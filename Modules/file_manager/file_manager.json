@@ -1,0 +1,20 @@
+[
+    {
+      "Name": "Local Config File",
+      "Source": "files\\local_config.txt",
+      "Destination": "C:\\ProgramData\\local_config.txt",
+      "Overwrite": true
+    },
+    {
+      "Name": "Camunda Installer File",
+      "Source": "C:\\Users\\albertomiyaki\\Downloads\\camunda-modeler-5.32.0-win-x64.zip",
+      "Destination": "C:\\Users\\albertomiyaki\\Documents\\Copied_files\\camunda_installer.zip",
+      "Overwrite": false
+    },
+    {
+      "Name": "Network File",
+      "Source": "\\\\MyServer\\SharedFolder\\app_config.cfg",
+      "Destination": "C:\\Configs\\app_config.cfg",
+      "Overwrite": true
+    }
+  ]

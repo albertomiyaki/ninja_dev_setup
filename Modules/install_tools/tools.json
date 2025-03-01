@@ -1,0 +1,37 @@
+[
+    {
+        "Name": "Visual Studio Code",
+        "Type": "exe_installer",
+        "Path": "assets\\vscode_setup.exe",
+        "Arguments": "/silent"
+    },
+    {
+        "Name": "Google Chrome",
+        "Type": "choco",
+        "Package": "googlechrome"
+    },
+    {
+        "Name": "7Zip",
+        "Type": "choco",
+        "Package": "7zip"
+    },
+    {
+        "Name": "Git",
+        "Type": "choco",
+        "Package": "git",
+        "Arguments": "--params '/GitAndUnixToolsOnPath /NoShellIntegration'"
+    },
+    {
+        "Name": "Notepad++",
+        "Type": "portable",
+        "Path": "C:\\Downloads\\npp_portable.zip",
+        "InstallLocation": "C:\\PortableApps\\Notepad++"
+    },
+    {
+        "Name": "Camunda",
+        "Type": "zip",
+        "Path": "C:\\Users\\albertomiyaki\\Downloads\\camunda-modeler-5.32.0-win-x64.zip",
+        "InstallLocation": "C:\\Temp\\tools\\Camunda"
+    }
+]
+
