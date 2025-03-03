@@ -1,3 +1,5 @@
+# Set sqlserver network + autentication mode
+
 $ErrorActionPreference = 'Stop'
 
 # Configuration variables
