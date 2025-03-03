@@ -1,4 +1,4 @@
-# Create sqlserver login
+# Create sqlserver login user
 
 $ErrorActionPreference = 'Stop'
 
@@ -138,12 +138,16 @@ catch {
     exit 1
 }
 
-# Get SQL login name from user
-$loginName = Read-Host "Enter the SQL login name to create"
+# Get SQL login name from user with default value
+$defaultLoginName = "wmuser"
+$loginPrompt = Read-Host "Enter the SQL login name to create [default: $defaultLoginName]"
 
-if ([string]::IsNullOrWhiteSpace($loginName)) {
-    Write-Log "Login name cannot be empty." -Level Error
-    exit 1
+# Use default if user just pressed Enter
+$loginName = if ([string]::IsNullOrWhiteSpace($loginPrompt)) { 
+    Write-Log "Using default login name: '$defaultLoginName'" -Level Info
+    $defaultLoginName 
+} else { 
+    $loginPrompt 
 }
 
 # Get secure password with confirmation
