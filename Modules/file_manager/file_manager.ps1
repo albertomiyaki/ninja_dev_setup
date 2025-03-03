@@ -1,4 +1,4 @@
-# Modern File Manager - Copy files based on JSON configuration
+# File Manager - Copy files based on JSON configuration
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase

@@ -1,4 +1,4 @@
-# Tool Installer with Modern XAML UI
+# Install Extra Tools
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
@@ -16,8 +16,6 @@ if (-not (Test-Administrator)) {
     Write-Host "Requesting administrative privileges..." -ForegroundColor Yellow
     
     $scriptPath = $MyInvocation.MyCommand.Definition
-    $scriptDir = Split-Path -Parent $scriptPath
-    $scriptFile = Split-Path -Leaf $scriptPath
     
     # Build arguments to pass to the elevated process
     $argString = ""
@@ -134,6 +132,9 @@ function Get-ToolsList {
             if ($tool.PSObject.Properties.Name -contains "Path") {
                 $tool.Path = Resolve-Path-Safe -Path $tool.Path
             }
+            if ($tool.PSObject.Properties.Name -contains "ScriptPath") {
+                $tool.ScriptPath = Resolve-Path-Safe -Path $tool.ScriptPath
+            }
         }
         
         Write-ToolLog "Successfully loaded $($toolsJson.Count) tools from tools.json" -Type Success
@@ -240,27 +241,99 @@ function Install-Zip {
 # Function to install via Chocolatey
 function Install-Choco {
     param ($tool)
-    
     try {
         $packageName = $tool.Package
         $extraArgs = if ($tool.PSObject.Properties.Name -contains "Arguments") { $tool.Arguments } else { "" }
-        
         Write-ToolLog "Installing $($tool.Name) via Chocolatey (package: $packageName)" -Type Information
         
         # Check if Chocolatey is installed
         if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
-            Write-ToolLog "Chocolatey is not installed. Installing now..." -Type Warning
+            Write-ToolLog "Chocolatey is not installed." -Type Warning
             
-            $sync.StatusBar.Text = "Installing Chocolatey..."
-            Set-ExecutionPolicy Bypass -Scope Process -Force
-            Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+            # Create a prompt window to ask user if they want to install Chocolatey
+            $chocoPrompt = New-Object System.Windows.Window
+            $chocoPrompt.Title = "Chocolatey Installation Required"
+            $chocoPrompt.SizeToContent = "WidthAndHeight"
+            $chocoPrompt.WindowStartupLocation = "CenterScreen"
+            $chocoPrompt.ResizeMode = "NoResize"
+            $chocoPrompt.Topmost = $true
             
-            if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
-                Write-ToolLog "Failed to install Chocolatey" -Type Error
+            $promptGrid = New-Object System.Windows.Controls.Grid
+            $promptGrid.Margin = "15"
+            
+            # Define grid rows
+            $row1 = New-Object System.Windows.Controls.RowDefinition
+            $row2 = New-Object System.Windows.Controls.RowDefinition
+            $promptGrid.RowDefinitions.Add($row1)
+            $promptGrid.RowDefinitions.Add($row2)
+            
+            # Message text
+            $messageText = New-Object System.Windows.Controls.TextBlock
+            $messageText.Text = "Chocolatey package manager is required to install $($tool.Name) but is not installed on this system. Would you like to install Chocolatey now?"
+            $messageText.TextWrapping = "Wrap"
+            $messageText.Margin = "0,0,0,15"
+            $messageText.MaxWidth = "400"
+            [System.Windows.Controls.Grid]::SetRow($messageText, 0)
+            $promptGrid.Children.Add($messageText)
+            
+            # Buttons panel
+            $buttonPanel = New-Object System.Windows.Controls.StackPanel
+            $buttonPanel.Orientation = "Horizontal"
+            $buttonPanel.HorizontalAlignment = "Right"
+            [System.Windows.Controls.Grid]::SetRow($buttonPanel, 1)
+            
+            # Yes button
+            $yesButton = New-Object System.Windows.Controls.Button
+            $yesButton.Content = "Yes, Install Chocolatey"
+            $yesButton.Padding = "10,5"
+            $yesButton.Margin = "0,0,10,0"
+            $yesButton.Background = "#0078D7"
+            $yesButton.Foreground = "White"
+            
+            # No button
+            $noButton = New-Object System.Windows.Controls.Button
+            $noButton.Content = "No, Skip Installation"
+            $noButton.Padding = "10,5"
+            
+            $userConsent = $false
+            
+            # Button click handlers
+            $yesButton.Add_Click({
+                $script:userConsent = $true
+                $chocoPrompt.Close()
+            })
+            
+            $noButton.Add_Click({
+                $script:userConsent = $false
+                $chocoPrompt.Close()
+            })
+            
+            # Add buttons to panel
+            $buttonPanel.Children.Add($yesButton)
+            $buttonPanel.Children.Add($noButton)
+            $promptGrid.Children.Add($buttonPanel)
+            
+            # Set window content and show dialog
+            $chocoPrompt.Content = $promptGrid
+            $chocoPrompt.ShowDialog() | Out-Null
+            
+            # Check user's response
+            if ($script:userConsent -eq $true) {
+                Write-ToolLog "User consented to Chocolatey installation. Installing now..." -Type Information
+                $sync.StatusBar.Text = "Installing Chocolatey..."
+                
+                Set-ExecutionPolicy Bypass -Scope Process -Force
+                Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+                
+                if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
+                    Write-ToolLog "Failed to install Chocolatey" -Type Error
+                    return $false
+                }
+                Write-ToolLog "Chocolatey installed successfully" -Type Success
+            } else {
+                Write-ToolLog "User declined Chocolatey installation. Aborting installation of $($tool.Name)." -Type Warning
                 return $false
             }
-            
-            Write-ToolLog "Chocolatey installed successfully" -Type Success
         }
         
         # Construct Chocolatey install command with optional arguments
@@ -273,14 +346,46 @@ function Install-Choco {
         if ($process.ExitCode -eq 0) {
             Write-ToolLog "$($tool.Name) installed successfully via Chocolatey" -Type Success
             return $true
+        } else {
+            Write-ToolLog "Chocolatey installation failed with exit code $($process.ExitCode)" -Type Error
+            return $false
+        }
+    } catch {
+        Write-ToolLog "Error installing $($tool.Name) via Chocolatey: $_" -Type Error
+        return $false
+    }
+}
+
+# Function to run custom installation script
+function Install-Custom {
+    param ($tool)
+    
+    try {
+        Write-ToolLog "Running custom installation for $($tool.Name)" -Type Information
+        
+        if (-not (Test-Path $tool.ScriptPath)) {
+            Write-ToolLog "Error: Script not found at $($tool.ScriptPath)" -Type Error
+            return $false
+        }
+        
+        $arguments = if ($tool.PSObject.Properties.Name -contains "ScriptArguments") { $tool.ScriptArguments } else { "" }
+        
+        $sync.StatusBar.Text = "Running custom installation for $($tool.Name)..."
+        
+        # Execute the PowerShell script with parameters if provided
+        $process = Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$($tool.ScriptPath)`" $arguments" -NoNewWindow -PassThru -Wait
+        
+        if ($process.ExitCode -eq 0) {
+            Write-ToolLog "Custom installation for $($tool.Name) completed successfully" -Type Success
+            return $true
         }
         else {
-            Write-ToolLog "Chocolatey installation failed with exit code $($process.ExitCode)" -Type Error
+            Write-ToolLog "Custom installation failed with exit code $($process.ExitCode)" -Type Error
             return $false
         }
     }
     catch {
-        Write-ToolLog "Error installing $($tool.Name) via Chocolatey: $_" -Type Error
+        Write-ToolLog "Error during custom installation for $($tool.Name): $_" -Type Error
         return $false
     }
 }
@@ -298,6 +403,7 @@ function Install-Tool {
             "portable" { Install-Portable -tool $tool }
             "zip" { Install-Zip -tool $tool }
             "choco" { Install-Choco -tool $tool }
+            "custom" { Install-Custom -tool $tool }
             default { 
                 Write-ToolLog "Unknown install type: $($tool.Type) for $($tool.Name)" -Type Warning
                 $false
@@ -427,7 +533,7 @@ function Install-SelectedTools {
                 
                 <StackPanel Grid.Column="0">
                     <TextBlock Text="Tool Installer" FontSize="22" Foreground="White" FontWeight="Bold"/>
-                    <TextBlock Text="Install software tools with a modern UI" Foreground="#999999" Margin="0,5,0,0"/>
+                    <TextBlock Text="Install software tools" Foreground="#999999" Margin="0,5,0,0"/>
                 </StackPanel>
                 
                 <Button x:Name="RefreshButton" Grid.Column="1" 
@@ -506,10 +612,11 @@ function Install-SelectedTools {
                                 <DataTemplate>
                                     <TextBlock>
                                         <TextBlock.Text>
-                                            <MultiBinding StringFormat="{}{0}{1}{2}">
+                                            <MultiBinding StringFormat="{}{0}{1}{2}{3}">
                                                 <Binding Path="Path" FallbackValue="" />
                                                 <Binding Path="Package" FallbackValue="" />
                                                 <Binding Path="InstallLocation" FallbackValue="" />
+                                                <Binding Path="ScriptPath" FallbackValue="" />
                                             </MultiBinding>
                                         </TextBlock.Text>
                                     </TextBlock>
@@ -675,6 +782,7 @@ $sync.ToolListView.Add_SelectionChanged({
                 "portable" { $details += " | Path: $($tool.Path) | Install Location: $($tool.InstallLocation)" }
                 "zip" { $details += " | Path: $($tool.Path) | Install Location: $($tool.InstallLocation)" }
                 "choco" { $details += " | Package: $($tool.Package)" }
+                "custom" { $details += " | Script Path: $($tool.ScriptPath)" }
             }
             
             $sync.SelectedToolDetails.Text = $details

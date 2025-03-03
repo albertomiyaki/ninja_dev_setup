@@ -22,6 +22,11 @@
         "Arguments": "--params '/GitAndUnixToolsOnPath /NoShellIntegration'"
     },
     {
+        "Name": "GitHub CLI",
+        "Type": "choco",
+        "Package": "gh"
+    },
+    {
         "Name": "Notepad++",
         "Type": "portable",
         "Path": "C:\\Downloads\\npp_portable.zip",
@@ -32,6 +37,16 @@
         "Type": "zip",
         "Path": "C:\\Users\\albertomiyaki\\Downloads\\camunda-modeler-5.32.0-win-x64.zip",
         "InstallLocation": "C:\\Temp\\tools\\Camunda"
+    },
+    {
+        "Name": "SQL Server Express",
+        "Type": "custom",
+        "ScriptPath": "sqlserver/install_sqlserver.ps1"
+    },
+    {
+        "Name": "SQL Server Management Studio (SSMS)",
+        "Type": "custom",
+        "ScriptPath": "sqlserver/install_ssms.ps1"
     }
 ]
 

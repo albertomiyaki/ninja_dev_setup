@@ -1,10 +1,10 @@
-# Modern Script Launcher - Launch PowerShell scripts with a modern UI
+# ninjaDEV Setup Launcher
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
 
-# Get the root directory dynamically
+# Get the root directory
 $scriptRoot = $PSScriptRoot
 $modulesFolder = Join-Path $scriptRoot "Modules"
 
@@ -83,25 +83,35 @@ function Get-ScriptDescription {
 function Get-AvailableScripts {
     try {
         Write-LauncherLog "Scanning for scripts in: $modulesFolder" -Type Information
+       
+        # Get immediate subdirectories under the Modules folder
+        $subfolders = Get-ChildItem -Path $modulesFolder -Directory -ErrorAction Stop
         
-        $scripts = Get-ChildItem -Path $modulesFolder -Recurse -Filter "*.ps1" -ErrorAction Stop | ForEach-Object {
-            [PSCustomObject]@{
-                Name = "$($_.Directory.Name)\$($_.Name)"  # Show folder and script name
-                Description = Get-ScriptDescription -ScriptPath $_.FullName
-                FullPath = $_.FullName
-                ModuleName = $_.Directory.Name
-                ScriptName = $_.Name
-                Status = "Ready"
-                LastRun = $null
+        $scripts = @()
+        
+        # For each subfolder, get only the PS1 files directly in that folder (not recursive)
+        foreach ($folder in $subfolders) {
+            $folderScripts = Get-ChildItem -Path $folder.FullName -Filter "*.ps1" -File -ErrorAction SilentlyContinue
+            
+            foreach ($script in $folderScripts) {
+                $scripts += [PSCustomObject]@{
+                    Name = "$($folder.Name)\$($script.Name)"  # Show folder and script name
+                    Description = Get-ScriptDescription -ScriptPath $script.FullName
+                    FullPath = $script.FullName
+                    ModuleName = $folder.Name
+                    ScriptName = $script.Name
+                    Status = "Ready"
+                    LastRun = $null
+                }
             }
         }
-
+        
         # If no scripts are found, return empty array
-        if ($null -eq $scripts) {
+        if ($null -eq $scripts -or $scripts.Count -eq 0) {
             Write-LauncherLog "No scripts found in the Modules folder" -Type Warning
             return @()
         }
-        
+       
         Write-LauncherLog "Found $($scripts.Count) scripts" -Type Success
         return $scripts
     }
@@ -254,7 +264,7 @@ function Update-RunspaceStatus {
 <Window 
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Title="PowerShell Script Launcher" 
+    Title="ninjaDEV Script Launcher" 
     Height="900" 
     Width="900"
     WindowStartupLocation="CenterScreen">
@@ -309,8 +319,8 @@ function Update-RunspaceStatus {
                 </Grid.ColumnDefinitions>
                 
                 <StackPanel Grid.Column="0">
-                    <TextBlock Text="PowerShell Script Launcher" FontSize="22" Foreground="White" FontWeight="Bold"/>
-                    <TextBlock Text="Launch and manage PowerShell scripts with a modern UI" Foreground="#999999" Margin="0,5,0,0"/>
+                    <TextBlock Text="ninjaDEV Script Launcher" FontSize="22" Foreground="White" FontWeight="Bold"/>
+                    <TextBlock Text="ninjaDEV: Launch and manage PowerShell scripts" Foreground="#999999" Margin="0,5,0,0"/>
                 </StackPanel>
                 
                 <Button x:Name="RefreshButton" Grid.Column="1" 
@@ -369,10 +379,17 @@ function Update-RunspaceStatus {
                 </ListView.Resources>
                 <ListView.View>
                     <GridView>
-                        <GridViewColumn Header="Module" Width="120">
+                        <GridViewColumn Header="Module" Width="140">
                             <GridViewColumn.CellTemplate>
                                 <DataTemplate>
                                     <TextBlock Text="{Binding ModuleName}" TextWrapping="NoWrap"/>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Header="Description" Width="400">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Description}" TextWrapping="Wrap"/>
                                 </DataTemplate>
                             </GridViewColumn.CellTemplate>
                         </GridViewColumn>
@@ -380,13 +397,6 @@ function Update-RunspaceStatus {
                             <GridViewColumn.CellTemplate>
                                 <DataTemplate>
                                     <TextBlock Text="{Binding ScriptName}" TextWrapping="NoWrap"/>
-                                </DataTemplate>
-                            </GridViewColumn.CellTemplate>
-                        </GridViewColumn>
-                        <GridViewColumn Header="Description" Width="350">
-                            <GridViewColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding Description}" TextWrapping="Wrap"/>
                                 </DataTemplate>
                             </GridViewColumn.CellTemplate>
                         </GridViewColumn>

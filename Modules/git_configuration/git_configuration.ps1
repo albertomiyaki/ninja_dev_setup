@@ -1,4 +1,4 @@
-# Modern Git Configuration Tool
+# Git Configuration Tool
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
@@ -477,7 +477,7 @@ function Edit-GitAliases {
                 
                 <StackPanel Grid.Column="0">
                     <TextBlock Text="Git Configuration Tool" FontSize="22" Foreground="White" FontWeight="Bold"/>
-                    <TextBlock Text="Configure your Git settings with a modern UI" Foreground="#999999" Margin="0,5,0,0"/>
+                    <TextBlock Text="Configure your Git settings" Foreground="#999999" Margin="0,5,0,0"/>
                 </StackPanel>
                 
                 <Button x:Name="ReloadButton" Grid.Column="1" 
@@ -670,6 +670,7 @@ $sync.UserNameTextBox = $window.FindName("UserNameTextBox")
 $sync.UserEmailTextBox = $window.FindName("UserEmailTextBox")
 $sync.EditorTextBox = $window.FindName("EditorTextBox")
 $sync.DefaultBranchComboBox = $window.FindName("DefaultBranchComboBox")
+$sync.EOLComboBox = $window.FindName("EOLComboBox")
 $sync.CredentialHelperComboBox = $window.FindName("CredentialHelperComboBox")
 $sync.AutoCRLFComboBox = $window.FindName("AutoCRLFComboBox")
 $sync.ColorUIComboBox = $window.FindName("ColorUIComboBox")
