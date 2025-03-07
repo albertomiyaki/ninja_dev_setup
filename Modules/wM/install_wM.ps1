@@ -1,12 +1,12 @@
 # Install wM products
 
-# Parameters for installer and image paths
+# Parameters for file paths
 param(
-    [string]$InstallerPath = "C:\Temp\installer\Installer20240626-w64.exe",
-    [string]$FallbackInstallerPath = "\\network\share\Installer20240626-w64.exe",
-    [string]$ImagePath = "C:\Temp\installer\image.zip",
-    [string]$FallbackImagePath = "\\network\share\image.zip"
+    [string]$BaseLocalPath = "C:\Temp\myProject",
+    [string]$ConfigFile = "files-config.json"
 )
+
+# Helper Functions
 
 function Get-ScriptDirectory {
     $scriptPath = $MyInvocation.MyCommand.Path
@@ -27,6 +27,89 @@ function Invoke-ElevatedScript {
     }
 }
 
+
+# File Handling Functions
+
+function Get-FileHash {
+    param(
+        [string]$FilePath,
+        [string]$Algorithm = "SHA256"
+    )
+    
+    try {
+        $hash = Get-FileHash -Path $FilePath -Algorithm $Algorithm
+        return $hash.Hash
+    }
+    catch {
+        Write-Host "Failed to calculate hash for $FilePath : $_" -ForegroundColor Yellow
+        return $null
+    }
+}
+
+function Ensure-FileExists {
+    param(
+        [string]$BaseLocalPath,
+        [PSCustomObject]$FileInfo
+    )
+    
+    # Construct full local path
+    $fullLocalPath = Join-Path -Path $BaseLocalPath -ChildPath $FileInfo.relativePath
+    
+    if (-not (Test-Path $fullLocalPath)) {
+        Write-Host "$($FileInfo.description) not found at $fullLocalPath" -ForegroundColor Yellow
+        Write-Host "Attempting to copy from $($FileInfo.fallbackPath)..." -ForegroundColor Yellow
+        
+        # Create directory if it doesn't exist
+        $targetDir = Split-Path $fullLocalPath -Parent
+        if (-not (Test-Path $targetDir)) {
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+            Write-Host "Created directory: $targetDir" -ForegroundColor Green
+        }
+        
+        # Copy the file
+        try {
+            Copy-Item -Path $FileInfo.fallbackPath -Destination $fullLocalPath -Force
+            Write-Host "$($FileInfo.description) copied successfully." -ForegroundColor Green
+        }
+        catch {
+            Write-Host "Failed to copy $($FileInfo.description): $_" -ForegroundColor Red
+            return $null
+        }
+    }
+    
+    # Verify hash if provided
+    if ($FileInfo.verifyHash -and $FileInfo.verifyHash -ne "") {
+        $fileHash = Get-FileHash -FilePath $fullLocalPath
+        if ($fileHash -and $fileHash -ne $FileInfo.verifyHash) {
+            Write-Host "Hash verification failed for $($FileInfo.description) !" -ForegroundColor Red
+            Write-Host "Expected: $($FileInfo.verifyHash)" -ForegroundColor Yellow
+            Write-Host "Actual  : $fileHash" -ForegroundColor Yellow
+            
+            # Try to recopy the file
+            try {
+                Write-Host "Attempting to recopy file..." -ForegroundColor Yellow
+                Copy-Item -Path $FileInfo.fallbackPath -Destination $fullLocalPath -Force
+                
+                # Verify hash again
+                $fileHash = Get-FileHash -FilePath $fullLocalPath
+                if ($fileHash -and $fileHash -ne $FileInfo.verifyHash) {
+                    Write-Host "Hash verification failed again for $($FileInfo.description) !" -ForegroundColor Red
+                    return $null
+                }
+            }
+            catch {
+                Write-Host "Failed to recopy $($FileInfo.description): $_" -ForegroundColor Red
+                return $null
+            }
+        }
+    }
+    
+    return $fullLocalPath
+}
+
+
+# Product Management Functions
+
 function Get-ProductDescription {
     param(
         [string]$FilePath
@@ -40,6 +123,67 @@ function Get-ProductDescription {
         return (Split-Path $FilePath -Leaf)
     }
 }
+
+function Test-NeedsPassword {
+    param(
+        [string]$FilePath
+    )
+    
+    # Check if file contains a line starting with "adminPassword="
+    $content = Get-Content -Path $FilePath
+    return ($content -match "^adminPassword=")
+}
+
+function Create-TempProductCopy {
+    param(
+        [string]$FilePath,
+        [string]$Password
+    )
+    
+    # Create a temp file path
+    $tempDir = [System.IO.Path]::GetTempPath()
+    $tempFileName = [System.IO.Path]::GetRandomFileName() + ".tmp"
+    $tempFilePath = Join-Path -Path $tempDir -ChildPath $tempFileName
+    
+    # Read the content and replace adminPassword line
+    $content = Get-Content -Path $FilePath
+    $newContent = $content -replace "^adminPassword=.*", "adminPassword=$Password"
+    
+    # Write to temp file
+    $newContent | Set-Content -Path $tempFilePath
+    
+    Write-Host "Created temporary copy of product file with password" -ForegroundColor Green
+    return $tempFilePath
+}
+
+function Install-Product {
+    param(
+        [string]$InstallerPath,
+        [string]$ScriptPath,
+        [string]$InstallerArgument
+    )
+    
+    try {
+        Write-Host "Installing using script: $ScriptPath..." -ForegroundColor Cyan
+        Write-Host "Using installer: $InstallerPath" -ForegroundColor Cyan
+        $process = Start-Process -FilePath $InstallerPath -ArgumentList "$InstallerArgument `"$ScriptPath`"" -Wait -PassThru -NoNewWindow
+        
+        if ($process.ExitCode -eq 0) {
+            return $true
+        }
+        else {
+            Write-Host "Installation failed with exit code: $($process.ExitCode)" -ForegroundColor Red
+            return $false
+        }
+    }
+    catch {
+        Write-Host "Error running installer: $_" -ForegroundColor Red
+        return $false
+    }
+}
+
+
+# User Interface Functions
 
 function Show-Menu {
     param(
@@ -120,73 +264,61 @@ function Confirm-Selection {
     return $confirmation -eq "Y" -or $confirmation -eq "y"
 }
 
-function Ensure-FileExists {
-    param(
-        [string]$FilePath,
-        [string]$FallbackPath,
-        [string]$FileDescription = "File"
-    )
-    
-    if (-not (Test-Path $FilePath)) {
-        Write-Host "$FileDescription not found at $FilePath" -ForegroundColor Yellow
-        Write-Host "Attempting to copy from $FallbackPath..." -ForegroundColor Yellow
-        
-        # Create directory if it doesn't exist
-        $targetDir = Split-Path $FilePath -Parent
-        if (-not (Test-Path $targetDir)) {
-            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-        }
-        
-        # Copy the file
-        try {
-            Copy-Item -Path $FallbackPath -Destination $FilePath -Force
-            Write-Host "$FileDescription copied successfully." -ForegroundColor Green
-            return $true
-        }
-        catch {
-            Write-Host "Failed to copy $FileDescription: $_" -ForegroundColor Red
-            return $false
-        }
-    }
-    
-    return $true
-}
 
-function Install-Product {
-    param(
-        [string]$InstallerPath,
-        [string]$ScriptPath
-    )
-    
-    try {
-        Write-Host "Installing $ScriptPath..." -ForegroundColor Cyan
-        $process = Start-Process -FilePath $InstallerPath -ArgumentList "-readScript `"$ScriptPath`"" -Wait -PassThru -NoNewWindow
-        
-        if ($process.ExitCode -eq 0) {
-            return $true
-        }
-        else {
-            Write-Host "Installation failed with exit code: $($process.ExitCode)" -ForegroundColor Red
-            return $false
-        }
-    }
-    catch {
-        Write-Host "Error running installer: $_" -ForegroundColor Red
-        return $false
-    }
-}
+# Main Script Execution
 
-# Main script execution
 try {
     # Ensure we're running as administrator
     Invoke-ElevatedScript
     
-    # Get script directory and products folder
+    # Get script directory and set paths
     $scriptDir = Get-ScriptDirectory
+    $configFilePath = Join-Path -Path $scriptDir -ChildPath $ConfigFile
     $productsDir = Join-Path -Path $scriptDir -ChildPath "products"
     
+    # Load configuration file
+    if (-not (Test-Path $configFilePath)) {
+        throw "Configuration file not found at: $configFilePath"
+    }
+    
+    $config = Get-Content -Path $configFilePath -Raw | ConvertFrom-Json
+    
+    if (-not $config.requiredFiles) {
+        throw "Invalid configuration file. Missing 'requiredFiles' section."
+    }
+    
+    # Set installer arguments from config
+    $installerArgs = $config.installerArgs ?? "-readScript"
+    
+    # Ensure products directory exists
     if (-not (Test-Path $productsDir)) {
         throw "Products directory not found at: $productsDir"
+    }
+    
+    # Ensure base local path exists
+    if (-not (Test-Path $BaseLocalPath)) {
+        New-Item -ItemType Directory -Path $BaseLocalPath -Force | Out-Null
+        Write-Host "Created base directory: $BaseLocalPath" -ForegroundColor Green
+    }
+    
+    # Ensure all required files exist
+    $requiredPaths = @{}
+    foreach ($fileInfo in $config.requiredFiles) {
+        $filePath = Ensure-FileExists -BaseLocalPath $BaseLocalPath -FileInfo $fileInfo
+        
+        if (-not $filePath) {
+            throw "Required file '$($fileInfo.relativePath)' could not be copied or verified."
+        }
+        
+        # Store the path for later use
+        $requiredPaths[$fileInfo.relativePath] = $filePath
+    }
+    
+    # Find installer path in required paths
+    $installerPath = $requiredPaths | Where-Object { $_.Key -like "*Installer*.exe" } | Select-Object -First 1 -ExpandProperty Value
+    
+    if (-not $installerPath) {
+        throw "Could not find installer executable in required files."
     }
     
     # Get all product files
@@ -224,28 +356,84 @@ try {
         exit
     }
     
-    # Ensure installer and image.zip exist
-    $installerExists = Ensure-FileExists -FilePath $InstallerPath -FallbackPath $FallbackInstallerPath -FileDescription "Installer"
-    
-    if (-not $installerExists) {
-        throw "Installer not found and could not be copied."
+    # Check if any selected products need a password
+    $passwordNeeded = $false
+    foreach ($product in $selectedProducts) {
+        if (Test-NeedsPassword -FilePath $product.Path) {
+            $passwordNeeded = $true
+            break
+        }
     }
     
-    $imageExists = Ensure-FileExists -FilePath $ImagePath -FallbackPath $FallbackImagePath -FileDescription "Image file"
-    
-    if (-not $imageExists) {
-        throw "Image file not found and could not be copied."
+    # If password needed, prompt once with confirmation
+    $adminPassword = $null
+    if ($passwordNeeded) {
+        $passwordsMatch = $false
+        while (-not $passwordsMatch) {
+            Write-Host "Admin password is required for one or more products" -ForegroundColor Yellow
+            $securePassword = Read-Host "Enter admin password" -AsSecureString
+            $secureConfirmPassword = Read-Host "Confirm admin password" -AsSecureString
+            
+            # Convert secure strings to plain text for comparison
+            $BSTR1 = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
+            $plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR1)
+            
+            $BSTR2 = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureConfirmPassword)
+            $plainConfirmPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR2)
+            
+            # Compare passwords
+            if ($plainPassword -eq $plainConfirmPassword) {
+                $passwordsMatch = $true
+                $adminPassword = $plainPassword
+                Write-Host "Passwords match" -ForegroundColor Green
+            } else {
+                Write-Host "Passwords do not match. Please try again." -ForegroundColor Red
+            }
+            
+            # Clean up
+            [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR1)
+            [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR2)
+            $plainPassword = $null
+            $plainConfirmPassword = $null
+        }
     }
     
     # Install each selected product
     $results = @()
+    $tempFiles = @()
+    
     foreach ($product in $selectedProducts) {
-        $success = Install-Product -InstallerPath $InstallerPath -ScriptPath $product.Path
+        $scriptPath = $product.Path
+        $needsPassword = Test-NeedsPassword -FilePath $scriptPath
+        
+        # If password is needed, create temp copy with the admin password
+        if ($needsPassword -and $adminPassword) {
+            Write-Host "Using admin password for $($product.Description)" -ForegroundColor Yellow
+            
+            # Create temp copy with password
+            $tempPath = Create-TempProductCopy -FilePath $scriptPath -Password $adminPassword
+            $tempFiles += $tempPath
+            $scriptPath = $tempPath
+        }
+        
+        # Run the installer with the appropriate script path
+        $success = Install-Product -InstallerPath $installerPath -ScriptPath $scriptPath -InstallerArgument $installerArgs
         $results += @{
             Product = $product.Description
             Success = $success
         }
     }
+    
+    # Clean up any temp files
+    foreach ($tempFile in $tempFiles) {
+        if (Test-Path $tempFile) {
+            Remove-Item -Path $tempFile -Force
+            Write-Host "Removed temporary file: $tempFile" -ForegroundColor Green
+        }
+    }
+    
+    # Clear the password from memory
+    $adminPassword = $null
     
     # Display summary
     Clear-Host

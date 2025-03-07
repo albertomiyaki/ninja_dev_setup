@@ -1,0 +1,29 @@
+{
+    "requiredFiles": [
+      {
+        "relativePath": "Installer20240626-w64.exe",
+        "fallbackPath": "\\\\network\\share\\Installer20240626-w64.exe",
+        "description": "Installer executable",
+        "verifyHash": "A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q7R8S9T0U1V2W3X4Y5Z6"
+      },
+      {
+        "relativePath": "image.zip",
+        "fallbackPath": "\\\\network\\share\\image.zip",
+        "description": "Installation image file",
+        "verifyHash": "Z6Y5X4W3V2U1T0S9R8Q7P6O5N4M3L2K1J0I9H8G7F6E5D4C3B2A1"
+      },
+      {
+        "relativePath": "resources\\config.xml",
+        "fallbackPath": "\\\\network\\share\\resources\\config.xml",
+        "description": "Configuration file",
+        "verifyHash": ""
+      },
+      {
+        "relativePath": "libraries\\common.dll",
+        "fallbackPath": "\\\\network\\share\\libraries\\common.dll",
+        "description": "Common library",
+        "verifyHash": ""
+      }
+    ],
+    "installerArgs": "-readScript"
+  }
