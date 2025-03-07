@@ -1,9 +1,11 @@
 # Install wM products
 
-# Parameters for installer paths
+# Parameters for installer and image paths
 param(
     [string]$InstallerPath = "C:\Temp\installer\Installer20240626-w64.exe",
-    [string]$FallbackInstallerPath = "\\network\share\Installer20240626-w64.exe"
+    [string]$FallbackInstallerPath = "\\network\share\Installer20240626-w64.exe",
+    [string]$ImagePath = "C:\Temp\installer\image.zip",
+    [string]$FallbackImagePath = "\\network\share\image.zip"
 )
 
 function Get-ScriptDirectory {
@@ -118,30 +120,31 @@ function Confirm-Selection {
     return $confirmation -eq "Y" -or $confirmation -eq "y"
 }
 
-function Ensure-InstallerExists {
+function Ensure-FileExists {
     param(
-        [string]$InstallerPath,
-        [string]$FallbackPath
+        [string]$FilePath,
+        [string]$FallbackPath,
+        [string]$FileDescription = "File"
     )
     
-    if (-not (Test-Path $InstallerPath)) {
-        Write-Host "Installer not found at $InstallerPath" -ForegroundColor Yellow
+    if (-not (Test-Path $FilePath)) {
+        Write-Host "$FileDescription not found at $FilePath" -ForegroundColor Yellow
         Write-Host "Attempting to copy from $FallbackPath..." -ForegroundColor Yellow
         
         # Create directory if it doesn't exist
-        $installerDir = Split-Path $InstallerPath -Parent
-        if (-not (Test-Path $installerDir)) {
-            New-Item -ItemType Directory -Path $installerDir -Force | Out-Null
+        $targetDir = Split-Path $FilePath -Parent
+        if (-not (Test-Path $targetDir)) {
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
         }
         
-        # Copy the installer
+        # Copy the file
         try {
-            Copy-Item -Path $FallbackPath -Destination $InstallerPath -Force
-            Write-Host "Installer copied successfully." -ForegroundColor Green
+            Copy-Item -Path $FallbackPath -Destination $FilePath -Force
+            Write-Host "$FileDescription copied successfully." -ForegroundColor Green
             return $true
         }
         catch {
-            Write-Host "Failed to copy installer: $_" -ForegroundColor Red
+            Write-Host "Failed to copy $FileDescription: $_" -ForegroundColor Red
             return $false
         }
     }
@@ -221,11 +224,17 @@ try {
         exit
     }
     
-    # Ensure installer exists
-    $installerExists = Ensure-InstallerExists -InstallerPath $InstallerPath -FallbackPath $FallbackInstallerPath
+    # Ensure installer and image.zip exist
+    $installerExists = Ensure-FileExists -FilePath $InstallerPath -FallbackPath $FallbackInstallerPath -FileDescription "Installer"
     
     if (-not $installerExists) {
         throw "Installer not found and could not be copied."
+    }
+    
+    $imageExists = Ensure-FileExists -FilePath $ImagePath -FallbackPath $FallbackImagePath -FileDescription "Image file"
+    
+    if (-not $imageExists) {
+        throw "Image file not found and could not be copied."
     }
     
     # Install each selected product
