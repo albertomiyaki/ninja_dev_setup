@@ -1,5 +1,23 @@
 # GitHub Repo Cloner
 
+# Check if running as administrator and self-elevate if needed
+function Test-Admin {
+    $currentUser = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    return $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Request-AdminPrivileges {
+    if (-not (Test-Admin)) {
+        Write-Host "Requesting administrative privileges..." -ForegroundColor Yellow
+        $scriptPath = $MyInvocation.MyCommand.Definition
+        Start-Process PowerShell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs
+        exit
+    }
+}
+
+# Run the elevation check at the start
+Request-AdminPrivileges
+
 # Set strict mode and error preferences for better error handling
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -51,7 +69,7 @@ function Install-GithubCLI {
     $installChoice = Read-Host @"
 How would you like to install GitHub CLI?
 1. Use Chocolatey (if installed)
-2. Download and install from GitHub
+2. Use local/network MSI installer
 Enter choice (1 or 2)
 "@
 
@@ -86,18 +104,27 @@ Enter choice (1 or 2)
         }
         
         "2" {
-            $msiUrl = "https://github.com/cli/cli/releases/download/v2.67.0/gh_2.67.0_windows_amd64.msi"
-            $msiPath = Join-Path $env:TEMP "gh_setup.msi"
+            # Default MSI path - adjust this to your organization's standard location
+            $defaultMsiPath = "C:\Installers\gh_2.67.0_windows_amd64.msi"
+            
+            # Ask for local/network path to MSI file with default value
+            $msiPathPrompt = Read-Host "Enter the path to the GitHub CLI MSI file (default: $defaultMsiPath)"
+            
+            # Use default if user just pressed Enter
+            $msiPath = if ([string]::IsNullOrWhiteSpace($msiPathPrompt)) { $defaultMsiPath } else { $msiPathPrompt }
+            
+            # Validate path exists
+            if (-not (Test-Path $msiPath)) {
+                Write-ColorMessage "The specified MSI file does not exist: $msiPath" -Level Error
+                if (Get-UserConfirmation "Would you like to specify a different path?") {
+                    return Install-GithubCLI
+                }
+                return $false
+            }
             
             try {
-                Write-ColorMessage "Downloading GitHub CLI installer..." -Level Info
-                Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath
-                
-                Write-ColorMessage "Installing GitHub CLI..." -Level Info
+                Write-ColorMessage "Installing GitHub CLI from: $msiPath" -Level Info
                 Start-Process -FilePath "msiexec" -ArgumentList "/i `"$msiPath`" /quiet" -Verb RunAs -Wait
-                
-                # Clean up
-                Remove-Item $msiPath -Force -ErrorAction SilentlyContinue
                 
                 # Refresh environment variables
                 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
