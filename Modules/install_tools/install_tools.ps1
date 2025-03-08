@@ -1,4 +1,5 @@
 # Install Extra Tools
+
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
@@ -149,6 +150,53 @@ function Get-ToolsList {
             [System.Windows.MessageBoxImage]::Error
         )
         return @()
+    }
+}
+
+# Function to add tool path to environment variables
+function Add-ToolToEnvPath {
+    param ($tool)
+    
+    try {
+        # Check if tool has EnvPath property
+        if ($tool.PSObject.Properties.Name -contains "EnvPath") {
+            $envPath = $tool.EnvPath
+            
+            # Resolve the path if it's relative
+            if (-not [System.IO.Path]::IsPathRooted($envPath)) {
+                $envPath = Resolve-Path-Safe -Path $envPath
+            }
+            
+            # Verify path exists
+            if ($envPath -and (Test-Path $envPath)) {
+                Write-ToolLog "Processing EnvPath for $($tool.Name): $envPath" -Type Information
+                
+                # Get current system PATH
+                $currentPath = [System.Environment]::GetEnvironmentVariable("Path", [System.EnvironmentVariableTarget]::Machine)
+                
+                # Check if path is already in the PATH variable
+                if ($currentPath -notlike "*$envPath*") {
+                    # Append and update system PATH
+                    $newPath = "$currentPath;$envPath"
+                    [System.Environment]::SetEnvironmentVariable("Path", $newPath, [System.EnvironmentVariableTarget]::Machine)
+                    Write-ToolLog "Added $envPath to system PATH" -Type Success
+                    return $true
+                } else {
+                    Write-ToolLog "$envPath is already in system PATH" -Type Information
+                    return $true
+                }
+            } else {
+                Write-ToolLog "EnvPath for $($tool.Name) not found or invalid: $envPath" -Type Warning
+                return $false
+            }
+        }
+        
+        # No EnvPath property - nothing to do
+        return $true
+    }
+    catch {
+        Write-ToolLog "Error adding $($tool.Name) to environment PATH: $_" -Type Error
+        return $false
     }
 }
 
@@ -433,6 +481,11 @@ function Install-Tool {
                 Write-ToolLog "Unknown install type: $($tool.Type) for $($tool.Name)" -Type Warning
                 $false
             }
+        }
+        
+        # If installation was successful, add to environment path if specified
+        if ($result) {
+            Add-ToolToEnvPath -tool $tool
         }
         
         $sync.CompletedTools++
@@ -808,6 +861,11 @@ $sync.ToolListView.Add_SelectionChanged({
                 "zip" { $details += " | Path: $($tool.Path) | Install Location: $($tool.InstallLocation)" }
                 "choco" { $details += " | Package: $($tool.Package)" }
                 "custom" { $details += " | Script Path: $($tool.ScriptPath)" }
+            }
+            
+            # Add EnvPath to details if available
+            if ($tool.PSObject.Properties.Name -contains "EnvPath") {
+                $details += " | EnvPath: $($tool.EnvPath)"
             }
             
             $sync.SelectedToolDetails.Text = $details
