@@ -51,7 +51,7 @@ function Show-Menu {
     while (-not $enterPressed) {
         Clear-Host
         Write-Host "`n $Title`n" -ForegroundColor Cyan
-        Write-Host " Use ↑/↓ arrow keys to navigate, Enter to select`n" -ForegroundColor Gray
+        Write-Host " Use up/down arrow keys to navigate, Enter to select`n" -ForegroundColor Gray
         
         for ($i = 0; $i -lt $Options.Count; $i++) {
             if ($i -eq $selection) {
