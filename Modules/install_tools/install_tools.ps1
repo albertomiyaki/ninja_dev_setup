@@ -51,6 +51,8 @@ $sync.ToolsInstalling = $false
 $sync.CurrentTool = ""
 $sync.TotalTools = 0
 $sync.CompletedTools = 0
+$sync.InstallationTimes = @{} # Store duration of each tool installation
+$sync.OverallStartTime = $null # Track overall installation start time
 
 # Create log function for centralized logging
 function Write-ToolLog {
@@ -477,6 +479,9 @@ function Install-Tool {
     $sync.CurrentTool = $tool.Name
     $sync.StatusBar.Text = "Installing $($tool.Name)..."
     
+    # Start timing the installation
+    $startTime = Get-Date
+    
     try {
         $result = switch ($tool.Type) {
             "exe_installer" { Install-EXE -tool $tool }
@@ -495,21 +500,35 @@ function Install-Tool {
             Add-ToolToEnvPath -tool $tool
         }
         
+        # Calculate and store the installation duration
+        $endTime = Get-Date
+        $duration = $endTime - $startTime
+        $formattedDuration = "{0:mm\:ss\.fff}" -f $duration
+        $sync.InstallationTimes[$tool.Name] = $duration
+        
         $sync.CompletedTools++
         $progress = [int](($sync.CompletedTools / $sync.TotalTools) * 100)
         $sync.ProgressBar.Value = $progress
         
         if ($result) {
-            $sync.StatusBar.Text = "$($tool.Name) installed successfully!"
+            $sync.StatusBar.Text = "$($tool.Name) installed successfully! (Duration: $formattedDuration)"
+            Write-ToolLog "$($tool.Name) installation completed in $formattedDuration" -Type Success
             return $true
         } else {
-            $sync.StatusBar.Text = "Failed to install $($tool.Name)"
+            $sync.StatusBar.Text = "Failed to install $($tool.Name) (Duration: $formattedDuration)"
+            Write-ToolLog "$($tool.Name) installation failed after $formattedDuration" -Type Error
             return $false
         }
     }
     catch {
-        Write-ToolLog "Error in Install-Tool for $($tool.Name): $_" -Type Error
-        $sync.StatusBar.Text = "Error installing $($tool.Name)"
+        # Calculate duration even when there's an error
+        $endTime = Get-Date
+        $duration = $endTime - $startTime
+        $formattedDuration = "{0:mm\:ss\.fff}" -f $duration
+        $sync.InstallationTimes[$tool.Name] = $duration
+        
+        Write-ToolLog "Error in Install-Tool for $($tool.Name): $_ (Duration: $formattedDuration)" -Type Error
+        $sync.StatusBar.Text = "Error installing $($tool.Name) (Duration: $formattedDuration)"
         return $false
     }
 }
@@ -527,6 +546,12 @@ function Install-SelectedTools {
     }
     
     try {
+        # Reset installation times
+        $sync.InstallationTimes = @{}
+        
+        # Start timing the overall installation process
+        $sync.OverallStartTime = Get-Date
+        
         $sync.ToolsInstalling = $true
         $sync.InstallButton.IsEnabled = $false
         $sync.TotalTools = $SelectedTools.Count
@@ -543,9 +568,31 @@ function Install-SelectedTools {
             if ($result) { $successful++ } else { $failed++ }
         }
         
+        # Calculate overall installation time
+        $overallEndTime = Get-Date
+        $overallDuration = $overallEndTime - $sync.OverallStartTime
+        $formattedOverallDuration = "{0:hh\:mm\:ss\.fff}" -f $overallDuration
+        
         $sync.ProgressBar.Value = 100
-        $sync.StatusBar.Text = "Installation completed: $successful succeeded, $failed failed"
-        Write-ToolLog "Installation completed: $successful tools installed successfully, $failed failed" -Type Information
+        
+        # Show installation summary
+        $sync.StatusBar.Text = "Installation completed in $formattedOverallDuration: $successful succeeded, $failed failed"
+        Write-ToolLog "Installation completed in $formattedOverallDuration: $successful tools installed successfully, $failed failed" -Type Information
+        
+        # Show timing report
+        Write-ToolLog "==== Installation Time Report ====" -Type Information
+        foreach ($toolName in $sync.InstallationTimes.Keys | Sort-Object) {
+            $toolDuration = $sync.InstallationTimes[$toolName]
+            $formattedToolDuration = "{0:mm\:ss\.fff}" -f $toolDuration
+            Write-ToolLog "$toolName : $formattedToolDuration" -Type Information
+        }
+        Write-ToolLog "Total installation time: $formattedOverallDuration" -Type Information
+        Write-ToolLog "=================================" -Type Information
+        
+        # Create a summary window with installation times if more than one tool was installed
+        if ($SelectedTools.Count -gt 1) {
+            Show-InstallationSummary -SuccessCount $successful -FailCount $failed -OverallDuration $overallDuration
+        }
     }
     catch {
         Write-ToolLog "Error during installation process: $_" -Type Error
@@ -889,6 +936,112 @@ $sync.ToolListView.Add_SelectionChanged({
         $sync.InstallButton.IsEnabled = $false
     }
 })
+
+# Function to show installation summary window
+function Show-InstallationSummary {
+    param (
+        [int]$SuccessCount,
+        [int]$FailCount,
+        [TimeSpan]$OverallDuration
+    )
+    
+    # Create a new window for the summary
+    $summaryWindow = New-Object System.Windows.Window
+    $summaryWindow.Title = "Installation Summary"
+    $summaryWindow.SizeToContent = "WidthAndHeight"
+    $summaryWindow.WindowStartupLocation = "CenterScreen"
+    $summaryWindow.ResizeMode = "NoResize"
+    $summaryWindow.Width = 500
+    $summaryWindow.MinHeight = 300
+    
+    # Create a grid for layout
+    $grid = New-Object System.Windows.Controls.Grid
+    $grid.Margin = "15"
+    
+    # Define grid rows
+    $rowDef1 = New-Object System.Windows.Controls.RowDefinition
+    $rowDef2 = New-Object System.Windows.Controls.RowDefinition
+    $rowDef3 = New-Object System.Windows.Controls.RowDefinition
+    $rowDef3.Height = "Auto"
+    $grid.RowDefinitions.Add($rowDef1)
+    $grid.RowDefinitions.Add($rowDef2)
+    $grid.RowDefinitions.Add($rowDef3)
+    
+    # Add header
+    $headerText = New-Object System.Windows.Controls.TextBlock
+    $headerText.Text = "Installation Complete"
+    $headerText.FontSize = 18
+    $headerText.FontWeight = "Bold"
+    $headerText.Margin = "0,0,0,10"
+    [System.Windows.Controls.Grid]::SetRow($headerText, 0)
+    $grid.Children.Add($headerText)
+    
+    # Create a scroll viewer for the timing details
+    $scrollViewer = New-Object System.Windows.Controls.ScrollViewer
+    $scrollViewer.VerticalScrollBarVisibility = "Auto"
+    $scrollViewer.MaxHeight = 350
+    [System.Windows.Controls.Grid]::SetRow($scrollViewer, 1)
+    
+    # Create a stack panel for the tool timing details
+    $stackPanel = New-Object System.Windows.Controls.StackPanel
+    $stackPanel.Margin = "0,0,0,10"
+    
+    # Add summary information
+    $summaryText = New-Object System.Windows.Controls.TextBlock
+    $formattedDuration = "{0:hh\:mm\:ss\.fff}" -f $OverallDuration
+    $summaryText.Text = "Total tools: $($SuccessCount + $FailCount) | Successful: $SuccessCount | Failed: $FailCount`r`nTotal duration: $formattedDuration"
+    $summaryText.Margin = "0,0,0,10"
+    $summaryText.TextWrapping = "Wrap"
+    $stackPanel.Children.Add($summaryText)
+    
+    # Add a header for the timing details
+    $detailsHeader = New-Object System.Windows.Controls.TextBlock
+    $detailsHeader.Text = "Installation Times by Tool:"
+    $detailsHeader.FontWeight = "Bold"
+    $detailsHeader.Margin = "0,5,0,5"
+    $stackPanel.Children.Add($detailsHeader)
+    
+    # Add timing details for each tool
+    foreach ($toolName in $sync.InstallationTimes.Keys | Sort-Object) {
+        $duration = $sync.InstallationTimes[$toolName]
+        $formattedToolDuration = "{0:mm\:ss\.fff}" -f $duration
+        
+        $toolPanel = New-Object System.Windows.Controls.DockPanel
+        $toolPanel.Margin = "3,2"
+        
+        $toolNameText = New-Object System.Windows.Controls.TextBlock
+        $toolNameText.Text = $toolName
+        $toolNameText.TextWrapping = "NoWrap"
+        $toolNameText.Margin = "0,0,10,0"
+        [System.Windows.Controls.DockPanel]::SetDock($toolNameText, "Left")
+        $toolPanel.Children.Add($toolNameText)
+        
+        $durationText = New-Object System.Windows.Controls.TextBlock
+        $durationText.Text = $formattedToolDuration
+        $durationText.HorizontalAlignment = "Right"
+        [System.Windows.Controls.DockPanel]::SetDock($durationText, "Right")
+        $toolPanel.Children.Add($durationText)
+        
+        $stackPanel.Children.Add($toolPanel)
+    }
+    
+    $scrollViewer.Content = $stackPanel
+    $grid.Children.Add($scrollViewer)
+    
+    # Add close button
+    $closeButton = New-Object System.Windows.Controls.Button
+    $closeButton.Content = "Close"
+    $closeButton.Padding = "20,5"
+    $closeButton.Margin = "0,10,0,0"
+    $closeButton.HorizontalAlignment = "Right"
+    [System.Windows.Controls.Grid]::SetRow($closeButton, 2)
+    $closeButton.Add_Click({ $summaryWindow.Close() })
+    $grid.Children.Add($closeButton)
+    
+    # Set the window content and show
+    $summaryWindow.Content = $grid
+    $summaryWindow.ShowDialog() | Out-Null
+}
 
 # Window closing event
 $sync.Window.Add_Closing({
