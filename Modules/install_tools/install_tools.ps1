@@ -155,17 +155,42 @@ function Get-ToolsList {
 # Function to install EXE installers
 function Install-EXE {
     param ($tool)
-    
     try {
         Write-ToolLog "Installing $($tool.Name) (EXE Installer)" -Type Information
         
+        # Check if local path exists, if not copy from fallback
         if (-not (Test-Path $tool.Path)) {
-            Write-ToolLog "Error: Installer not found at $($tool.Path)" -Type Error
-            return $false
+            Write-ToolLog "Installer not found at $($tool.Path), attempting to copy from fallback location" -Type Warning
+            
+            # Check if fallback path exists
+            if ($tool.PSObject.Properties.Name -contains "FallbackPath" -and (Test-Path $tool.FallbackPath)) {
+                # Create directory if it doesn't exist
+                $directory = Split-Path -Path $tool.Path -Parent
+                if (-not (Test-Path $directory)) {
+                    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+                    Write-ToolLog "Created directory: $directory" -Type Information
+                }
+                
+                # Copy the file from fallback
+                Copy-Item -Path $tool.FallbackPath -Destination $tool.Path -Force
+                Write-ToolLog "Copied installer from $($tool.FallbackPath) to $($tool.Path)" -Type Information
+                
+                # Verify copy was successful
+                if (-not (Test-Path $tool.Path)) {
+                    Write-ToolLog "Error: Failed to copy installer from fallback location" -Type Error
+                    return $false
+                }
+            }
+            else {
+                Write-ToolLog "Error: Installer not found at primary path and no valid fallback path available" -Type Error
+                return $false
+            }
         }
         
+        # Get arguments or use default
         $arguments = if ($tool.PSObject.Properties.Name -contains "Arguments") { $tool.Arguments } else { "/quiet" }
         
+        # Update status and run installer
         $sync.StatusBar.Text = "Installing $($tool.Name)..."
         Start-Process -FilePath $tool.Path -ArgumentList $arguments -Wait
         
