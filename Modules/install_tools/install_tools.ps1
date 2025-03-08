@@ -162,6 +162,13 @@ function Add-ToolToEnvPath {
         if ($tool.PSObject.Properties.Name -contains "EnvPath") {
             $envPath = $tool.EnvPath
             
+            # Expand environment variables if present in the path
+            if ($envPath -match '\$env:') {
+                Write-ToolLog "Expanding environment variables in path: $envPath" -Type Information
+                $envPath = $ExecutionContext.InvokeCommand.ExpandString($envPath)
+                Write-ToolLog "Expanded path: $envPath" -Type Information
+            }
+            
             # Resolve the path if it's relative
             if (-not [System.IO.Path]::IsPathRooted($envPath)) {
                 $envPath = Resolve-Path-Safe -Path $envPath
