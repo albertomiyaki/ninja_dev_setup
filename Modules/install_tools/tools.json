@@ -39,6 +39,11 @@
         "InstallLocation": "C:\\Temp\\tools\\Camunda"
     },
     {
+        "Name": "TailWm",
+        "Type": "custom",
+        "ScriptPath": "tailwm/install_tailwm.ps1"
+    },
+    {
         "Name": "SQL Server Express",
         "Type": "custom",
         "ScriptPath": "sqlserver/install_sqlserver.ps1"
