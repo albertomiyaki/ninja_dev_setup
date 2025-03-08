@@ -10,6 +10,16 @@ param(
 
 function Get-ScriptDirectory {
     $scriptPath = $MyInvocation.MyCommand.Path
+    if (-not $scriptPath) {
+        Write-Host "Warning: Unable to determine script path using MyInvocation.MyCommand.Path" -ForegroundColor Yellow
+        # Try alternate method
+        $scriptPath = $PSCommandPath
+        if (-not $scriptPath) {
+            Write-Host "Warning: Unable to determine script path using PSCommandPath" -ForegroundColor Yellow
+            # Fallback to current directory
+            return (Get-Location).Path
+        }
+    }
     return Split-Path $scriptPath -Parent
 }
 
@@ -52,11 +62,27 @@ function Ensure-FileExists {
         [PSCustomObject]$FileInfo
     )
     
+    if (-not $BaseLocalPath) {
+        Write-Host "Error: Base local path is null or empty" -ForegroundColor Red
+        return $null
+    }
+    
+    if (-not $FileInfo -or -not $FileInfo.relativePath) {
+        Write-Host "Error: File information is missing or invalid" -ForegroundColor Red
+        return $null
+    }
+    
     # Construct full local path
     $fullLocalPath = Join-Path -Path $BaseLocalPath -ChildPath $FileInfo.relativePath
     
     if (-not (Test-Path $fullLocalPath)) {
         Write-Host "$($FileInfo.description) not found at $fullLocalPath" -ForegroundColor Yellow
+        
+        if (-not $FileInfo.fallbackPath) {
+            Write-Host "Error: Fallback path is missing for $($FileInfo.relativePath)" -ForegroundColor Red
+            return $null
+        }
+        
         Write-Host "Attempting to copy from $($FileInfo.fallbackPath)..." -ForegroundColor Yellow
         
         # Create directory if it doesn't exist
@@ -68,6 +94,11 @@ function Ensure-FileExists {
         
         # Copy the file
         try {
+            if (-not (Test-Path $FileInfo.fallbackPath)) {
+                Write-Host "Error: Fallback path does not exist: $($FileInfo.fallbackPath)" -ForegroundColor Red
+                return $null
+            }
+            
             Copy-Item -Path $FileInfo.fallbackPath -Destination $fullLocalPath -Force
             Write-Host "$($FileInfo.description) copied successfully." -ForegroundColor Green
         }
@@ -87,6 +118,11 @@ function Ensure-FileExists {
             
             # Try to recopy the file
             try {
+                if (-not (Test-Path $FileInfo.fallbackPath)) {
+                    Write-Host "Error: Fallback path does not exist: $($FileInfo.fallbackPath)" -ForegroundColor Red
+                    return $null
+                }
+                
                 Write-Host "Attempting to recopy file..." -ForegroundColor Yellow
                 Copy-Item -Path $FileInfo.fallbackPath -Destination $fullLocalPath -Force
                 
@@ -115,11 +151,21 @@ function Get-ProductDescription {
         [string]$FilePath
     )
     
-    $firstLine = Get-Content -Path $FilePath -TotalCount 1
-    if ($firstLine -match "^#(.*)") {
-        return $Matches[1].Trim()
+    if (-not $FilePath -or -not (Test-Path $FilePath)) {
+        return "Unknown product"
     }
-    else {
+    
+    try {
+        $firstLine = Get-Content -Path $FilePath -TotalCount 1 -ErrorAction Stop
+        if ($firstLine -match "^#(.*)") {
+            return $Matches[1].Trim()
+        }
+        else {
+            return (Split-Path $FilePath -Leaf)
+        }
+    }
+    catch {
+        Write-Host "Warning: Could not read product description: $_" -ForegroundColor Yellow
         return (Split-Path $FilePath -Leaf)
     }
 }
@@ -129,9 +175,19 @@ function Test-NeedsPassword {
         [string]$FilePath
     )
     
-    # Check if file contains a line starting with "adminPassword="
-    $content = Get-Content -Path $FilePath
-    return ($content -match "^adminPassword=")
+    if (-not $FilePath -or -not (Test-Path $FilePath)) {
+        return $false
+    }
+    
+    try {
+        # Check if file contains a line starting with "adminPassword="
+        $content = Get-Content -Path $FilePath -ErrorAction Stop
+        return ($content -match "^adminPassword=")
+    }
+    catch {
+        Write-Host "Warning: Could not check if product needs password: $_" -ForegroundColor Yellow
+        return $false
+    }
 }
 
 function Create-TempProductCopy {
@@ -273,7 +329,17 @@ try {
     
     # Get script directory and set paths
     $scriptDir = Get-ScriptDirectory
+    
+    if (-not $scriptDir) {
+        throw "Unable to determine script directory."
+    }
+    
     $configFilePath = Join-Path -Path $scriptDir -ChildPath $ConfigFile
+    
+    if (-not $ConfigFile) {
+        throw "Config file name is null or empty."
+    }
+    
     $productsDir = Join-Path -Path $scriptDir -ChildPath "products"
     
     # Load configuration file
@@ -281,14 +347,20 @@ try {
         throw "Configuration file not found at: $configFilePath"
     }
     
-    $config = Get-Content -Path $configFilePath -Raw | ConvertFrom-Json
+    try {
+        $configContent = Get-Content -Path $configFilePath -Raw -ErrorAction Stop
+        $config = $configContent | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw "Failed to read or parse configuration file: $_"
+    }
     
     if (-not $config.requiredFiles) {
         throw "Invalid configuration file. Missing 'requiredFiles' section."
     }
     
     # Set installer arguments from config
-    $installerArgs = $config.installerArgs ?? "-readScript"
+    $installerArgs = if ($config.installerArgs) { $config.installerArgs } else { "-readScript" }
     
     # Ensure products directory exists
     if (-not (Test-Path $productsDir)) {
@@ -315,7 +387,12 @@ try {
     }
     
     # Find installer path in required paths
-    $installerPath = $requiredPaths | Where-Object { $_.Key -like "*Installer*.exe" } | Select-Object -First 1 -ExpandProperty Value
+    $installerPath = $null
+    $installerKey = $requiredPaths.Keys | Where-Object { $_ -like "*Installer*.exe" } | Select-Object -First 1
+    
+    if ($installerKey) {
+        $installerPath = $requiredPaths[$installerKey]
+    }
     
     if (-not $installerPath) {
         throw "Could not find installer executable in required files."
