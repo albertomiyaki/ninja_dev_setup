@@ -1,0 +1,29 @@
+{
+    "instances": [
+      {
+        "instanceName": "ProductionDB",
+        "databaseName": "ProductionDatabase",
+        "componentsList": "Core,Auth,Reporting"
+      },
+      {
+        "instanceName": "DevelopmentDB",
+        "databaseName": "DevDatabase",
+        "componentsList": "Core,Auth,Integration,Testing"
+      },
+      {
+        "instanceName": "TestingDB",
+        "databaseName": "TestDatabase",
+        "componentsList": "Core,Auth"
+      },
+      {
+        "instanceName": "AnalyticsDB",
+        "databaseName": "AnalyticsDatabase",
+        "componentsList": "Core,Reporting,Analytics"
+      },
+      {
+        "instanceName": "StagingDB",
+        "databaseName": "StagingDatabase",
+        "componentsList": "Core,Auth,Integration"
+      }
+    ]
+  }

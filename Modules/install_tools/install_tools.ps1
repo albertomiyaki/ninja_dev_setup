@@ -140,8 +140,10 @@ function Get-ToolsList {
             }
         }
         
+        $sortedTools = $toolsJson | Sort-Object -Property Name
+
         Write-ToolLog "Successfully loaded $($toolsJson.Count) tools from tools.json" -Type Success
-        return $toolsJson
+        return $sortedTools
     }
     catch {
         Write-ToolLog "Error loading tools.json: $_" -Type Error

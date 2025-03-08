@@ -3,7 +3,7 @@
 # Parameters for file paths
 param(
     [string]$BaseLocalPath = "C:\Temp\myProject",
-    [string]$ConfigFile = "files-config.json"
+    [string]$ConfigFile = "install_wM_config.json"
 )
 
 # Helper Functions
