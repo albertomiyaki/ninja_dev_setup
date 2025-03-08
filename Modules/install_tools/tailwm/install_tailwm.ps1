@@ -5,11 +5,11 @@
 
 # Configuration section - Edit these variables as needed
 $tailToolName = "baretail"  # Options: baretail, glogg, or any other tool
-$batchFilePath = "C:\Program Files\tailwm\"  # Where to save the batch file
+$batchFilePath = "$env:USERPROFILE\Tools"  # Where to save the batch file
 $logMappings = @{
-    "myapp1" = "c:\program files\myapp1\log\app.log"
-    "myapp2" = "c:\program files\myapp2\log\app.log"
-    "myapp3" = "c:\program files\myapp3\log\app.log"
+    "myapp1" = "c:\program files\myapp1\log\server.log"
+    "myapp2" = "c:\program files\myapp2\log\server.log"
+    "myapp3" = "c:\program files\myapp3\log\server.log"
     # Add more mappings as needed
 }
 
@@ -23,10 +23,14 @@ if (-not (Test-Path -Path $batchFilePath)) {
 $batchContent = "@echo off`r`n"
 
 # Add each app mapping
-foreach ($app in $logMappings.Keys | Sort-Object) {
+$sortedKeys = $logMappings.Keys | Sort-Object
+$firstApp = $true
+
+foreach ($app in $sortedKeys) {
     $logPath = $logMappings[$app]
-    if ($app -eq $logMappings.Keys[0]) {
+    if ($firstApp) {
         $batchContent += "if ""%1""==""$app"" (`r`n"
+        $firstApp = $false
     } else {
         $batchContent += ") else if ""%1""==""$app"" (`r`n"
     }
@@ -40,7 +44,7 @@ $batchContent += "    echo Available options: $($logMappings.Keys -join ', ')`r`
 $batchContent += ")`r`n"
 
 # Write batch file
-$batchFile = Join-Path -Path $batchFilePath -ChildPath "tailwm.bat"
+$batchFile = Join-Path -Path $batchFilePath -ChildPath "tailmylog.bat"
 $batchContent | Out-File -FilePath $batchFile -Encoding ASCII -Force
 
 Write-Host "Created batch file: $batchFile" -ForegroundColor Green
@@ -58,6 +62,6 @@ if ($currentPath -notlike "*$batchFilePath*") {
 
 # Show usage information
 Write-Host "`nSetup complete! You can now use:" -ForegroundColor Green
-Write-Host "tailwm <appname>" -ForegroundColor White
+Write-Host "tailmylog <appname>" -ForegroundColor White
 Write-Host "Where <appname> is one of: $($logMappings.Keys -join ', ')" -ForegroundColor White
 Write-Host "`nTo modify log mappings or change the tail tool, edit this script and run it again." -ForegroundColor Cyan
