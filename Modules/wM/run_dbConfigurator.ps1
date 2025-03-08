@@ -2,7 +2,7 @@
 
 # Parameters
 param(
-    [string]$ConfigFilePath = "run_dbConfigurator_config",
+    [string]$ConfigFilePath = "run_dbConfigurator_config.json",
     [string]$ExecutablePath = "C:\Program Files\dbTools\dbConfigurator.bat"
 )
 
