@@ -1,22 +1,39 @@
 # GitHub Repo Cloner
 
 # Check if running as administrator and self-elevate if needed
-function Test-Admin {
+function Test-Administrator {
     $currentUser = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     return $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Request-AdminPrivileges {
-    if (-not (Test-Admin)) {
-        Write-Host "Requesting administrative privileges..." -ForegroundColor Yellow
-        $scriptPath = $MyInvocation.MyCommand.Definition
-        Start-Process PowerShell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs
-        exit
+# Self-elevate the script if required
+if (-not (Test-Administrator)) {
+    Write-Host "Requesting administrative privileges..." -ForegroundColor Yellow
+    
+    $scriptPath = $MyInvocation.MyCommand.Definition
+    
+    # Build arguments to pass to the elevated process
+    $argString = ""
+    if ($MyInvocation.BoundParameters.Count -gt 0) {
+        $argString = "-ExecutionPolicy Bypass -File `"$scriptPath`""
+        foreach ($key in $MyInvocation.BoundParameters.Keys) {
+            $value = $MyInvocation.BoundParameters[$key]
+            if ($value -is [System.String]) {
+                $argString += " -$key `"$value`""
+            } else {
+                $argString += " -$key $value"
+            }
+        }
+    } else {
+        $argString = "-ExecutionPolicy Bypass -File `"$scriptPath`""
     }
+    
+    # Start PowerShell as administrator with this script
+    Start-Process -FilePath PowerShell.exe -ArgumentList $argString -Verb RunAs
+    
+    # Exit the non-elevated script
+    exit
 }
-
-# Run the elevation check at the start
-Request-AdminPrivileges
 
 # Set strict mode and error preferences for better error handling
 Set-StrictMode -Version Latest
