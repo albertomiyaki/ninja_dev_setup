@@ -40,7 +40,7 @@ if (-not (Test-Administrator)) {
 
 # Get the script's root directory
 $scriptRoot = $PSScriptRoot
-$serverSettingsPath = Join-Path $scriptRoot "server_settings"
+$serverSettingsPath = Join-Path $scriptRoot "extended_settings"
 
 # Function for logging to console
 function Write-Log {
