@@ -65,6 +65,103 @@ function Write-Log {
     }
 }
 
+# Function to create an interactive selection menu using arrow keys and spacebar
+function Show-InteractiveMenu {
+    param (
+        [array]$Items,
+        [string]$Prompt,
+        [switch]$MultiSelect
+    )
+    
+    if ($Items.Count -eq 0) {
+        return @()
+    }
+    
+    $selection = @()
+    $selected = @($false) * $Items.Count
+    $currentIndex = 0
+    $cursorPosition = $Host.UI.RawUI.CursorPosition
+    $originalY = $cursorPosition.Y
+    
+    Write-Host "`n$Prompt" -ForegroundColor Cyan
+    Write-Host "=======================================" -ForegroundColor Cyan
+    if ($MultiSelect) {
+        Write-Host "Use ↑↓ arrows to navigate, Space to select/deselect, A to select all, N to select none, Enter to confirm" -ForegroundColor Yellow
+    } else {
+        Write-Host "Use ↑↓ arrows to navigate, Enter to select" -ForegroundColor Yellow
+    }
+    
+    # Draw initial menu
+    for ($i = 0; $i -lt $Items.Count; $i++) {
+        $prefix = if ($i -eq $currentIndex) { ">" } else { " " }
+        $checkbox = if ($MultiSelect) {
+            if ($selected[$i]) { "[X] " } else { "[ ] " }
+        } else { "" }
+        
+        $color = if ($i -eq $currentIndex) { "White" } else { "Gray" }
+        Write-Host "$prefix $checkbox$($Items[$i])" -ForegroundColor $color
+    }
+    
+    # Handle keyboard input
+    while ($true) {
+        $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        
+        # Reset cursor position to redraw menu
+        $cursorPosition.Y = $originalY + 2  # +2 to account for the header and instructions
+        $Host.UI.RawUI.CursorPosition = $cursorPosition
+        
+        switch ($key.VirtualKeyCode) {
+            38 { # Up arrow
+                if ($currentIndex -gt 0) { $currentIndex-- }
+            }
+            40 { # Down arrow
+                if ($currentIndex -lt $Items.Count - 1) { $currentIndex++ }
+            }
+            32 { # Spacebar
+                if ($MultiSelect) {
+                    $selected[$currentIndex] = -not $selected[$currentIndex]
+                }
+            }
+            65 { # 'A' key
+                if ($MultiSelect) {
+                    $selected = @($true) * $Items.Count
+                }
+            }
+            78 { # 'N' key
+                if ($MultiSelect) {
+                    $selected = @($false) * $Items.Count
+                }
+            }
+            13 { # Enter key
+                if ($MultiSelect) {
+                    for ($i = 0; $i -lt $Items.Count; $i++) {
+                        if ($selected[$i]) {
+                            $selection += $Items[$i]
+                        }
+                    }
+                    return $selection
+                } else {
+                    return $Items[$currentIndex]
+                }
+            }
+            27 { # Escape key
+                return @()
+            }
+        }
+        
+        # Clear and redraw menu
+        for ($i = 0; $i -lt $Items.Count; $i++) {
+            $prefix = if ($i -eq $currentIndex) { ">" } else { " " }
+            $checkbox = if ($MultiSelect) {
+                if ($selected[$i]) { "[X] " } else { "[ ] " }
+            } else { "" }
+            
+            $color = if ($i -eq $currentIndex) { "White" } else { "Gray" }
+            Write-Host "`r$prefix $checkbox$($Items[$i])                                        " -ForegroundColor $color
+        }
+    }
+}
+
 # Function to read a setting file and extract destination path and settings
 function Get-SettingsFromFile {
     param (
@@ -80,7 +177,7 @@ function Get-SettingsFromFile {
         $lines = Get-Content -Path $FilePath
         
         if ($lines.Count -eq 0) {
-            Write-Log "Settings file is empty: $FilePath" -Type Warning
+            Write-Log "Settings file is empty: $($FilePath)" -Type Warning
             return $null
         }
         
@@ -125,7 +222,7 @@ function Get-SettingsFromFile {
         }
     }
     catch {
-        Write-Log "Error processing settings file $FilePath: $_" -Type Error
+        Write-Log "Error processing settings file $($FilePath): $_" -Type Error
         return $null
     }
 }
@@ -224,7 +321,7 @@ function Update-TargetFile {
         }
     }
     catch {
-        Write-Log "Error updating target file $TargetPath: $_" -Type Error
+        Write-Log "Error updating target file $($TargetPath): $_" -Type Error
         return @{
             Success = $false
             Updated = 0
@@ -259,60 +356,6 @@ function Get-ServerConfigFiles {
     }
 }
 
-# Function to prompt user for selection from a list
-function Get-UserSelection {
-    param (
-        [array]$Items,
-        [string]$Prompt,
-        [switch]$MultiSelect
-    )
-    
-    if ($Items.Count -eq 0) {
-        return @()
-    }
-    
-    Write-Host "`n$Prompt" -ForegroundColor Cyan
-    Write-Host "=========================================" -ForegroundColor Cyan
-    
-    for ($i = 0; $i -lt $Items.Count; $i++) {
-        Write-Host "[$($i+1)] $($Items[$i])"
-    }
-    
-    if ($MultiSelect) {
-        Write-Host "`nEnter numbers separated by commas, 'all' to select all, or 'none' to cancel: " -ForegroundColor Yellow -NoNewline
-        $selection = Read-Host
-        
-        if ($selection -eq "none") {
-            return @()
-        }
-        
-        if ($selection -eq "all") {
-            return $Items
-        }
-        
-        $selectedIndices = $selection -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ - 1 }
-        return $selectedIndices | Where-Object { $_ -ge 0 -and $_ -lt $Items.Count } | ForEach-Object { $Items[$_] }
-    }
-    else {
-        Write-Host "`nEnter a number, or 'none' to cancel: " -ForegroundColor Yellow -NoNewline
-        $selection = Read-Host
-        
-        if ($selection -eq "none") {
-            return $null
-        }
-        
-        if ($selection -match '^\d+$') {
-            $index = [int]$selection - 1
-            if ($index -ge 0 -and $index -lt $Items.Count) {
-                return $Items[$index]
-            }
-        }
-        
-        Write-Host "Invalid selection" -ForegroundColor Red
-        return $null
-    }
-}
-
 # Main function to run the interactive settings updater
 function Start-InteractiveSettingsUpdater {
     Clear-Host
@@ -330,7 +373,7 @@ function Start-InteractiveSettingsUpdater {
     
     # Display list of configuration files and let user select one
     $fileOptions = $configFiles | ForEach-Object { $_.Name }
-    $selectedFileName = Get-UserSelection -Items $fileOptions -Prompt "Select a configuration file to process:"
+    $selectedFileName = Show-InteractiveMenu -Items $fileOptions -Prompt "Select a configuration file to process:"
     
     if ($null -eq $selectedFileName) {
         Write-Host "No file selected. Exiting." -ForegroundColor Yellow
@@ -352,7 +395,7 @@ function Start-InteractiveSettingsUpdater {
     Write-Host "Found $($fileSettings.Settings.Count) settings in configuration file`n" -ForegroundColor Green
     
     # Get current values from target file for comparison
-    $targetExists = Test-Path $fileSettings.TargetPath
+    $targetExists = Test-Path $($fileSettings.TargetPath)
     if ($targetExists) {
         Write-Host "Target file exists. Getting current values for comparison..." -ForegroundColor Cyan
     } else {
@@ -362,12 +405,16 @@ function Start-InteractiveSettingsUpdater {
     # Display settings with current values and let user select which to apply
     $settingOptions = @()
     foreach ($setting in $fileSettings.Settings) {
-        $currentValue = $targetExists ? (Get-CurrentSettingValue -FilePath $fileSettings.TargetPath -SettingKey $setting.Key) : "<file will be created>"
+        $currentValue = if ($targetExists) { 
+            Get-CurrentSettingValue -FilePath $($fileSettings.TargetPath) -SettingKey $($setting.Key) 
+        } else { 
+            "<file will be created>" 
+        }
         $settingOptions += "[Line $($setting.LineNumber)] $($setting.Key) = $($setting.Value) (Current: $currentValue)"
         $setting.CurrentValue = $currentValue
     }
     
-    $selectedSettingOptions = Get-UserSelection -Items $settingOptions -Prompt "Select settings to apply:" -MultiSelect
+    $selectedSettingOptions = Show-InteractiveMenu -Items $settingOptions -Prompt "Select settings to apply:" -MultiSelect
     
     if ($selectedSettingOptions.Count -eq 0) {
         Write-Host "No settings selected. Exiting." -ForegroundColor Yellow
@@ -397,7 +444,7 @@ function Start-InteractiveSettingsUpdater {
     }
     
     # Apply the selected settings
-    $result = Update-TargetFile -TargetPath $fileSettings.TargetPath -SelectedSettings $selectedSettings
+    $result = Update-TargetFile -TargetPath $($fileSettings.TargetPath) -SelectedSettings $selectedSettings
     
     if ($result.Success) {
         Write-Host "`nUpdated target file successfully!" -ForegroundColor Green
