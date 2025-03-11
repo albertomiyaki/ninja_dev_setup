@@ -37,6 +37,16 @@ if (-not (Test-Administrator)) {
     exit
 }
 
+# Verify keytool is available
+function Test-KeytoolAvailable {
+    try {
+        $null = & keytool -help 2>&1
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 function Show-Menu {
     param (
         [string]$Title,
@@ -50,18 +60,21 @@ function Show-Menu {
     
     while (-not $enterPressed) {
         Clear-Host
-        Write-Host "`n $Title`n" -ForegroundColor Cyan
-        Write-Host " Use up/down arrow keys to navigate, Enter to select`n" -ForegroundColor Gray
+        Write-Host "===================================" -ForegroundColor Cyan
+        Write-Host "        $Title" -ForegroundColor Cyan
+        Write-Host "===================================" -ForegroundColor Cyan
         
         for ($i = 0; $i -lt $Options.Count; $i++) {
             if ($i -eq $selection) {
-                Write-Host " > " -NoNewline -ForegroundColor Green
+                Write-Host "  [>>] " -NoNewline -ForegroundColor Green
                 & $DisplayFunction $Options[$i] $true
             } else {
-                Write-Host "   " -NoNewline
+                Write-Host "  [  ] " -NoNewline -ForegroundColor Gray
                 & $DisplayFunction $Options[$i] $false
             }
         }
+        
+        Write-Host "(Use ↑ and ↓ arrow keys to navigate, press Enter to select)" -ForegroundColor Gray
         
         $key = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         
@@ -94,15 +107,33 @@ function Display-Certificate {
     $issuer = $Certificate.Issuer
     $thumbprint = $Certificate.Thumbprint
     $expiration = $Certificate.NotAfter.ToString("yyyy-MM-dd")
+    $keyType = "Unknown"
+    
+    # Try to determine key type
+    try {
+        if ($Certificate.HasPrivateKey) {
+            if ([System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Certificate)) {
+                $keyType = "RSA"
+            } elseif ([System.Security.Cryptography.X509Certificates.ECDsaCertificateExtensions]::GetECDsaPrivateKey($Certificate)) {
+                $keyType = "ECDSA"
+            } elseif ([System.Security.Cryptography.X509Certificates.DSACertificateExtensions]::GetDSAPrivateKey($Certificate)) {
+                $keyType = "DSA"
+            }
+        } else {
+            $keyType = "No Private Key"
+        }
+    } catch {
+        # Ignore errors when determining key type
+    }
     
     # Format the subject for better display
     $subjectCN = if ($subject -match "CN=([^,]+)") { $matches[1] } else { $subject }
     
     Write-Host "$subjectCN" -ForegroundColor $color
-    Write-Host "      Thumbprint: $thumbprint" -ForegroundColor Gray
-    Write-Host "      Expiration: $expiration" -ForegroundColor Gray
-    Write-Host "      Issuer: $issuer" -ForegroundColor Gray
-    Write-Host ""
+    Write-Host "      Thumbprint: $thumbprint" -ForegroundColor $color
+    Write-Host "      Key Type: $keyType" -ForegroundColor $color
+    Write-Host "      Expiration: $expiration" -ForegroundColor $color
+    Write-Host "      Issuer: $issuer" -ForegroundColor $color
 }
 
 function Get-ExportableCertificates {
@@ -115,12 +146,15 @@ function Get-ExportableCertificates {
     foreach ($cert in $store.Certificates) {
         if ($cert.HasPrivateKey) {
             try {
-                $key = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
-                if ($key -and $key.Key.ExportPolicy -ne "NonExportable") {
-                    $exportableCerts += $cert
-                }
+                # Create a temporary in-memory PFX to test if we can export the key
+                $tempPassword = ConvertTo-SecureString -String "TempPassword123!" -Force -AsPlainText
+                $pfxBytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pkcs12, $tempPassword)
+                
+                # If we get here without exception, it's exportable
+                $exportableCerts += $cert
             } catch {
-                # Skip certificates where we can't check exportability
+                # Certificate's private key is not exportable
+                Write-Debug "Certificate $($cert.Subject) has a non-exportable private key: $_"
             }
         }
     }
@@ -150,54 +184,142 @@ function Get-Password {
         }
     }
     
-    return $password
+    return $password, $passwordText
 }
 
-function Export-CertificateToP12 {
-    param (
+function Export-CertificateToPfxWithKeytool {
+    param(
         [System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate,
-        [System.Security.SecureString]$Password,
+        [string]$Password,
         [string]$FilePath,
-        [string]$Algorithm
+        [string]$KeyAlias,
+        [string]$Algorithm = "AES256"
     )
     
     try {
-        # Create export options based on the selected algorithm
-        $exportParams = @{
-            Cert = $Certificate
-            FilePath = $FilePath
-            Password = $Password
-            Force = $true
+        # First export the certificate with private key to a temporary PFX file
+        $tempDir = [System.IO.Path]::GetTempPath()
+        $tempPfxFile = Join-Path -Path $tempDir -ChildPath "temp_$([System.Guid]::NewGuid().ToString()).pfx"
+        $securePassword = ConvertTo-SecureString -String $Password -Force -AsPlainText
+        
+        Write-Host "Exporting certificate to temporary file..." -ForegroundColor Yellow
+        Export-PfxCertificate -Cert $Certificate -FilePath $tempPfxFile -Password $securePassword -Force | Out-Null
+        
+        # Create the destination directory if it doesn't exist
+        $destinationFolder = Split-Path -Path $FilePath -Parent
+        if (-not (Test-Path -Path $destinationFolder)) {
+            New-Item -Path $destinationFolder -ItemType Directory -Force | Out-Null
+            Write-Host "Created directory: $destinationFolder" -ForegroundColor Yellow
         }
         
-        # Set encryption algorithm if specified
-        if ($Algorithm -ne "Default") {
-            $exportParams.ChainOption = "EndEntityCertOnly"
+        # Prepare keytool import command with the proper algorithm
+        $keystoreType = "PKCS12"
+        
+        # Set the appropriate keystore algorithm based on user selection
+        $keystoreAlgorithm = switch ($Algorithm) {
+            "AES256" { "PBEWithHmacSHA256AndAES_256" }
+            "3DES" { "PBEWithSHA1AndDESede" }
+            default { "PBEWithHmacSHA256AndAES_256" }
+        }
+        
+        # Get the current alias from the PFX file using the verbose flag for reliable parsing
+        Write-Host "Identifying original alias in certificate store..." -ForegroundColor Yellow
+        $listAliasCmd = "keytool -list -v -keystore `"$tempPfxFile`" -storetype PKCS12 -storepass `"$Password`""
+        $listOutput = Invoke-Expression $listAliasCmd 2>&1
+        
+        $originalAlias = $null
+        
+        # Parse the verbose output to find the PrivateKeyEntry alias
+        if ($listOutput -match "Alias name:\s*([^\r\n]+)[\r\n]+[^\r\n]*[\r\n]+Entry type: PrivateKeyEntry") {
+            $originalAlias = $matches[1].Trim()
+            Write-Host "Found original alias: $originalAlias" -ForegroundColor Green
+        } else {
+            # Fallback to non-verbose parsing if verbose parsing fails
+            $listAliasCmd = "keytool -list -keystore `"$tempPfxFile`" -storetype PKCS12 -storepass `"$Password`""
+            $listOutput = Invoke-Expression $listAliasCmd 2>&1
             
-            switch ($Algorithm) {
-                "AES256" {
-                    $exportParams.CryptoAlgorithmOption = "AES256_SHA256"
-                }
-                "3DES" {
-                    $exportParams.CryptoAlgorithmOption = "TripleDES_SHA1"
-                }
+            # Look for pattern like "alias, date, PrivateKeyEntry,"
+            if ($listOutput -match "([^,]+),\s*[^,]+,\s*PrivateKeyEntry,") {
+                $originalAlias = $matches[1].Trim()
+                Write-Host "Found original alias (non-verbose): $originalAlias" -ForegroundColor Green
+            } else {
+                throw "Could not determine original alias in PFX file"
             }
         }
         
-        # Export the certificate
-        Export-PfxCertificate @exportParams | Out-Null
+        # Import the PFX to the destination keystore
+        Write-Host "Importing certificate to keystore..." -ForegroundColor Yellow
+        
+        $keytoolImportArgs = @(
+            "-importkeystore",
+            "-srckeystore", "`"$tempPfxFile`"",
+            "-srcstoretype", "PKCS12",
+            "-srcstorepass", "`"$Password`"",
+            "-destkeystore", "`"$FilePath`"",
+            "-deststoretype", "$keystoreType",
+            "-deststorepass", "`"$Password`"",
+            "-destkeypass", "`"$Password`"",
+            "-srcalias", "`"$originalAlias`"",
+            "-destalias", "`"$KeyAlias`"",
+            "-noprompt"
+        )
+        
+        # If algorithm is not default, add the appropriate flags
+        if ($Algorithm -ne "Default") {
+            $keytoolImportArgs += @(
+                "-J-Dkeystore.pkcs12.keyProtectionAlgorithm=$keystoreAlgorithm"
+            )
+        }
+        
+        $keytoolImportCommand = "keytool $($keytoolImportArgs -join ' ')"
+        
+        # Execute the command
+        $keytoolOutput = Invoke-Expression $keytoolImportCommand 2>&1
+        
+        # Check if the command was successful
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Keytool import failed with exit code $LASTEXITCODE" -ForegroundColor Red
+            Write-Host "Output: $keytoolOutput" -ForegroundColor Red
+            throw "Failed to import certificate with keytool"
+        }
+        
+        # Cleanup temporary file
+        if (Test-Path -Path $tempPfxFile) {
+            Remove-Item -Path $tempPfxFile -Force
+        }
         
         Write-Host "`nCertificate successfully exported to: $FilePath" -ForegroundColor Green
+        Write-Host "Private key alias: $KeyAlias" -ForegroundColor Green
         Write-Host "Remember to store the password securely!" -ForegroundColor Yellow
-    } catch {
-        Write-Host "`nError exporting certificate: $_" -ForegroundColor Red
+    }
+    catch {
+        Write-Host "`nError exporting certificate with keytool: $_" -ForegroundColor Red
+        
+        # Fallback to standard Export-PfxCertificate if keytool method fails
+        try {
+            Write-Host "Falling back to standard Windows export method (without custom alias)..." -ForegroundColor Yellow
+            $securePassword = ConvertTo-SecureString -String $Password -Force -AsPlainText
+            Export-PfxCertificate -Cert $Certificate -FilePath $FilePath -Password $securePassword -Force | Out-Null
+            Write-Host "Certificate exported successfully with default alias." -ForegroundColor Green
+        } catch {
+            Write-Host "Fallback export failed: $_" -ForegroundColor Red
+        }
     }
 }
 
 # Main Script
 
-Write-Host "Export Personal Certificate with Private Key" -ForegroundColor Cyan
-Write-Host "----------------------------------------------`n" 
+Write-Host "Export Personal Certificate " -ForegroundColor Cyan
+Write-Host "-------------------------------------`n" 
+
+# Check if keytool is available
+if (-not (Test-KeytoolAvailable)) {
+    Write-Host "Error: 'keytool' command not found in PATH." -ForegroundColor Red
+    Write-Host "Please make sure Java is installed and keytool is available in your PATH." -ForegroundColor Yellow
+    Write-Host "Press any key to exit..." -ForegroundColor Gray
+    $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown") | Out-Null
+    exit
+}
 
 # Get exportable certificates
 $exportableCerts = Get-ExportableCertificates
@@ -212,35 +334,39 @@ if ($exportableCerts.Count -eq 0) {
 Write-Host "Retrieving certificates with exportable private keys..." -ForegroundColor Yellow
 Start-Sleep -Seconds 1
 
-$selectedCert = Show-Menu -Title "Select a certificate to export:" -Options $exportableCerts -DisplayFunction ${function:Display-Certificate}
+$selectedCert = Show-Menu -Title "Select Certificate to Export" -Options $exportableCerts -DisplayFunction ${function:Display-Certificate}
 
 # Ask for password
-$password = Get-Password
+$securePassword, $passwordText = Get-Password
 
 # Select encryption algorithm
 $algorithms = @("Default", "AES256", "3DES")
-$selectedAlgorithm = Show-Menu -Title "Select encryption algorithm:" -Options $algorithms -DisplayFunction {
+$selectedAlgorithm = Show-Menu -Title "Select Encryption Algorithm" -Options $algorithms -DisplayFunction {
     param($Algorithm, $Selected)
     $color = if ($Selected) { "Green" } else { "White" }
-    Write-Host "$Algorithm" -ForegroundColor $color
-    Write-Host ""
+    Write-Host "Encryption: $Algorithm" -ForegroundColor $color
 }
 
-# Determine default file path
-$defaultFileName = "$($selectedCert.Subject -replace 'CN=|[,=].*', '').p12"
-$defaultFileName = $defaultFileName -replace '[\\/:*?"<>|]', '_' # Remove invalid filename characters
-$defaultPath = Join-Path -Path ([Environment]::GetFolderPath("Desktop")) -ChildPath $defaultFileName
+# Get hostname for default path and alias
+$hostname = [System.Net.Dns]::GetHostName().ToLower()
+
+# Create default directory and file path
+$defaultDirectory = Join-Path -Path $env:USERPROFILE -ChildPath "tls"
+$defaultFileName = "${hostname}_keystore.p12"
+$defaultPath = Join-Path -Path $defaultDirectory -ChildPath $defaultFileName
 
 # Ask for file path
 Write-Host "`nExport Location" -ForegroundColor Cyan
 Write-Host "Default path: $defaultPath" -ForegroundColor Yellow
 $userPath = Read-Host "Enter export path (or press Enter for default)"
-
 $filePath = if ([string]::IsNullOrWhiteSpace($userPath)) { $defaultPath } else { $userPath }
 
+# Use hostname as the key alias
+$keyAlias = $hostname
+
 # Export the certificate
-Write-Host "`nExporting certificate..." -ForegroundColor Yellow
-Export-CertificateToP12 -Certificate $selectedCert -Password $password -FilePath $filePath -Algorithm $selectedAlgorithm
+Write-Host "`nExporting certificate with alias '$keyAlias'..." -ForegroundColor Yellow
+Export-CertificateToPfxWithKeytool -Certificate $selectedCert -Password $passwordText -FilePath $filePath -KeyAlias $keyAlias -Algorithm $selectedAlgorithm
 
 Write-Host "`nPress any key to exit..." -ForegroundColor Gray
 $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown") | Out-Null
