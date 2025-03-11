@@ -4,8 +4,8 @@
 # and adds the batch file to the system PATH
 
 # Configuration section - Edit these variables as needed
-$tailToolName = "baretail"  # Default tool - will be configurable in the bat file
-$batchFilePath = "$env:USERPROFILE\Tools\tailwm\"  # Where to save the batch file
+$tailToolName = "baretail"                          # Default tool - will be configurable in the bat file
+$batchFilePath = "$env:USERPROFILE\Tools\tailwm\"   # Where to save the batch file
 $logMappings = @{
     "myapp1" = "c:\program files\myapp1\log\server.log"
     "myapp2" = "c:\program files\myapp2\log\server.log"
@@ -40,7 +40,9 @@ foreach ($app in $sortedKeys) {
     } else {
         $batchContent += ") else if ""%1""==""$app"" (`r`n"
     }
-    $batchContent += "    %LOGTOOL% ""$logPath""`r`n"
+
+    # Use START command to run in background
+    $batchContent += "    start """" %LOGTOOL% ""$logPath""`r`n"
 }
 
 # Add help section
