@@ -74,7 +74,7 @@ function Show-Menu {
             }
         }
         
-        Write-Host "(Use up and down arrow keys to navigate, press Enter to select)" -ForegroundColor Gray
+        Write-Host "(Use ↑ and ↓ arrow keys to navigate, press Enter to select)" -ForegroundColor Gray
         
         $key = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         
@@ -327,6 +327,14 @@ function Export-CertificateToPfxWithKeytool {
         Write-Host "`nCertificate successfully exported to: $FilePath" -ForegroundColor Green
         Write-Host "Private key alias: $KeyAlias" -ForegroundColor Green
         Write-Host "Remember to store the password securely!" -ForegroundColor Yellow
+        
+        # Open Windows Explorer to the output directory
+        try {
+            Start-Process "explorer.exe" -ArgumentList "/select,`"$FilePath`""
+            Write-Host "Opened Windows Explorer to the export location." -ForegroundColor Green
+        } catch {
+            Write-Host "Could not open Windows Explorer: $_" -ForegroundColor Yellow
+        }
     }
     catch {
         Write-Host "`nError exporting certificate with keytool: $_" -ForegroundColor Red
@@ -337,6 +345,14 @@ function Export-CertificateToPfxWithKeytool {
             $securePassword = ConvertTo-SecureString -String $Password -Force -AsPlainText
             Export-PfxCertificate -Cert $Certificate -FilePath $FilePath -Password $securePassword -Force | Out-Null
             Write-Host "Certificate exported successfully with default alias." -ForegroundColor Green
+            
+            # Open Windows Explorer to the output directory
+            try {
+                Start-Process "explorer.exe" -ArgumentList "/select,`"$FilePath`""
+                Write-Host "Opened Windows Explorer to the export location." -ForegroundColor Green
+            } catch {
+                Write-Host "Could not open Windows Explorer: $_" -ForegroundColor Yellow
+            }
         } catch {
             Write-Host "Fallback export failed: $_" -ForegroundColor Red
         }
@@ -392,14 +408,41 @@ $commonName = Get-CommonName -Certificate $selectedCert
 # Sanitize the common name for use as a filename (remove invalid characters)
 $commonNameSanitized = $commonName -replace '[\\/:*?"<>|]', '_'
 
-# Create output directory and file path
-$outputDirectory = "C:\temp\tls"
+# Ask for output directory with default C:\temp\tls
+$defaultDirectory = "C:\temp\tls"
+Write-Host "`nExport Location" -ForegroundColor Cyan
+Write-Host "Default path: $defaultDirectory" -ForegroundColor Yellow
+$userDirectory = Read-Host "Enter export directory (or press Enter for default)"
+$outputDirectory = if ([string]::IsNullOrWhiteSpace($userDirectory)) { $defaultDirectory } else { $userDirectory }
+
+# Create output file path
 $outputFileName = "${commonNameSanitized}_keystore.p12"
 $filePath = Join-Path -Path $outputDirectory -ChildPath $outputFileName
 
 # Export the certificate with the Common Name as the alias
 Write-Host "`nExporting certificate with Common Name '$commonName' as alias..." -ForegroundColor Yellow
 Export-CertificateToPfxWithKeytool -Certificate $selectedCert -Password $passwordText -FilePath $filePath -KeyAlias $commonName -Algorithm $selectedAlgorithm
+
+# Log the export details to a file
+$logDirectory = Split-Path -Path $filePath -Parent
+$logFile = Join-Path -Path $logDirectory -ChildPath "certificate_export_log.txt"
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+$logMessage = @"
+[$timestamp] Certificate Export Details:
+- File Path: $filePath
+- Certificate Subject: $($selectedCert.Subject)
+- Thumbprint: $($selectedCert.Thumbprint)
+- Key Alias: $commonName
+- Algorithm: $selectedAlgorithm
+- Expiration Date: $($selectedCert.NotAfter.ToString("yyyy-MM-dd"))
+"@
+
+try {
+    Add-Content -Path $logFile -Value $logMessage -Force
+    Write-Host "`nExport details logged to: $logFile" -ForegroundColor Cyan
+} catch {
+    Write-Host "`nCould not write to log file: $_" -ForegroundColor Yellow
+}
 
 Write-Host "`nPress any key to exit..." -ForegroundColor Gray
 $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown") | Out-Null
