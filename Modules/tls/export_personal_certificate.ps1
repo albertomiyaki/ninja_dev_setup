@@ -74,7 +74,7 @@ function Show-Menu {
             }
         }
         
-        Write-Host "(Use ↑ and ↓ arrow keys to navigate, press Enter to select)" -ForegroundColor Gray
+        Write-Host "(Use up and down arrow keys to navigate, press Enter to select)" -ForegroundColor Gray
         
         $key = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         
