@@ -1,0 +1,10 @@
+[
+    {
+        "Name": "My Documents",
+        "Path": "C:\\Users\\Username\\Documents"
+    },
+    {
+        "Name": "Project Folder",
+        "Path": "\\\\server\\share\\projects"
+    }
+]
