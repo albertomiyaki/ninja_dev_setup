@@ -136,9 +136,33 @@ function Display-Certificate {
     Write-Host "      Issuer: $issuer" -ForegroundColor $color
 }
 
+function Display-StoreOption {
+    param (
+        [PSObject]$Option,
+        [bool]$Selected
+    )
+    
+    $color = if ($Selected) { "Green" } else { "White" }
+    Write-Host "$($Option.Name) - $($Option.Description)" -ForegroundColor $color
+}
+
+function Display-Algorithm {
+    param (
+        [string]$Algorithm,
+        [bool]$Selected
+    )
+    
+    $color = if ($Selected) { "Green" } else { "White" }
+    Write-Host "Encryption: $Algorithm" -ForegroundColor $color
+}
+
 function Get-ExportableCertificates {
-    # Get certificates from the personal store that have exportable private keys
-    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("My", "CurrentUser")
+    param (
+        [string]$StoreLocation
+    )
+    
+    # Get certificates from the specified store that have exportable private keys
+    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("My", $StoreLocation)
     $store.Open("ReadOnly")
     
     $exportableCerts = @()
@@ -185,6 +209,20 @@ function Get-Password {
     }
     
     return $password, $passwordText
+}
+
+function Get-CommonName {
+    param (
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
+    )
+    
+    # Extract the Common Name from the subject
+    if ($Certificate.Subject -match "CN=([^,]+)") {
+        return $matches[1].Trim()
+    } else {
+        # Fallback to a safe name based on thumbprint if CN is not available
+        return "cert_" + $Certificate.Thumbprint.Substring(0, 8)
+    }
 }
 
 function Export-CertificateToPfxWithKeytool {
@@ -264,12 +302,10 @@ function Export-CertificateToPfxWithKeytool {
             "-noprompt"
         )
         
-        # If algorithm is not default, add the appropriate flags
-        if ($Algorithm -ne "Default") {
-            $keytoolImportArgs += @(
-                "-J-Dkeystore.pkcs12.keyProtectionAlgorithm=$keystoreAlgorithm"
-            )
-        }
+        # Add the appropriate algorithm flags
+        $keytoolImportArgs += @(
+            "-J-Dkeystore.pkcs12.keyProtectionAlgorithm=$keystoreAlgorithm"
+        )
         
         $keytoolImportCommand = "keytool $($keytoolImportArgs -join ' ')"
         
@@ -321,52 +357,49 @@ if (-not (Test-KeytoolAvailable)) {
     exit
 }
 
-# Get exportable certificates
-$exportableCerts = Get-ExportableCertificates
+# Define certificate store options
+$storeOptions = @(
+    [PSCustomObject]@{ Name = "Current User"; Description = "Personal certificates for the current user (certmgr.msc)"; Value = "CurrentUser" },
+    [PSCustomObject]@{ Name = "Local Machine"; Description = "Computer-wide certificates (certlm.msc)"; Value = "LocalMachine" }
+)
+
+# Let the user select which certificate store to use
+$selectedStore = Show-Menu -Title "Select Certificate Store" -Options $storeOptions -DisplayFunction ${function:Display-StoreOption}
+
+# Get exportable certificates from the selected store
+Write-Host "Retrieving certificates with exportable private keys from $($selectedStore.Name) store..." -ForegroundColor Yellow
+$exportableCerts = Get-ExportableCertificates -StoreLocation $selectedStore.Value
 
 if ($exportableCerts.Count -eq 0) {
-    Write-Host "No exportable certificates with private keys were found in your personal store." -ForegroundColor Red
+    Write-Host "No exportable certificates with private keys were found in the $($selectedStore.Name) store." -ForegroundColor Red
     Write-Host "Please ensure you have certificates with exportable private keys installed." -ForegroundColor Yellow
     exit
 }
 
 # Display the menu and let user select a certificate
-Write-Host "Retrieving certificates with exportable private keys..." -ForegroundColor Yellow
 Start-Sleep -Seconds 1
-
 $selectedCert = Show-Menu -Title "Select Certificate to Export" -Options $exportableCerts -DisplayFunction ${function:Display-Certificate}
 
 # Ask for password
 $securePassword, $passwordText = Get-Password
 
-# Select encryption algorithm
-$algorithms = @("Default", "AES256", "3DES")
-$selectedAlgorithm = Show-Menu -Title "Select Encryption Algorithm" -Options $algorithms -DisplayFunction {
-    param($Algorithm, $Selected)
-    $color = if ($Selected) { "Green" } else { "White" }
-    Write-Host "Encryption: $Algorithm" -ForegroundColor $color
-}
+# Select encryption algorithm (keeping only AES256 and 3DES)
+$algorithms = @("AES256", "3DES")
+$selectedAlgorithm = Show-Menu -Title "Select Encryption Algorithm" -Options $algorithms -DisplayFunction ${function:Display-Algorithm}
 
-# Get hostname for default path and alias
-$hostname = [System.Net.Dns]::GetHostName().ToLower()
+# Get the Common Name for the alias and filename
+$commonName = Get-CommonName -Certificate $selectedCert
+# Sanitize the common name for use as a filename (remove invalid characters)
+$commonNameSanitized = $commonName -replace '[\\/:*?"<>|]', '_'
 
-# Create default directory and file path
-$defaultDirectory = Join-Path -Path $env:USERPROFILE -ChildPath "tls"
-$defaultFileName = "${hostname}_keystore.p12"
-$defaultPath = Join-Path -Path $defaultDirectory -ChildPath $defaultFileName
+# Create output directory and file path
+$outputDirectory = "C:\temp\tls"
+$outputFileName = "${commonNameSanitized}_keystore.p12"
+$filePath = Join-Path -Path $outputDirectory -ChildPath $outputFileName
 
-# Ask for file path
-Write-Host "`nExport Location" -ForegroundColor Cyan
-Write-Host "Default path: $defaultPath" -ForegroundColor Yellow
-$userPath = Read-Host "Enter export path (or press Enter for default)"
-$filePath = if ([string]::IsNullOrWhiteSpace($userPath)) { $defaultPath } else { $userPath }
-
-# Use hostname as the key alias
-$keyAlias = $hostname
-
-# Export the certificate
-Write-Host "`nExporting certificate with alias '$keyAlias'..." -ForegroundColor Yellow
-Export-CertificateToPfxWithKeytool -Certificate $selectedCert -Password $passwordText -FilePath $filePath -KeyAlias $keyAlias -Algorithm $selectedAlgorithm
+# Export the certificate with the Common Name as the alias
+Write-Host "`nExporting certificate with Common Name '$commonName' as alias..." -ForegroundColor Yellow
+Export-CertificateToPfxWithKeytool -Certificate $selectedCert -Password $passwordText -FilePath $filePath -KeyAlias $commonName -Algorithm $selectedAlgorithm
 
 Write-Host "`nPress any key to exit..." -ForegroundColor Gray
 $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown") | Out-Null
