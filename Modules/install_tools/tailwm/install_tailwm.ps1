@@ -1,12 +1,15 @@
 # TailWm setup
 
-# This script creates a tailwm.bat file for tailing log files with a configurable tool
+# This script creates tailwm.bat and tailwm.config files for tailing log files with a configurable tool
 # and adds the batch file to the system PATH
 
 # Configuration section - Edit these variables as needed
 $tailToolName = "baretail"                          # Default tool - will be configurable in the bat file
-$batchFilePath = "$env:USERPROFILE\Tools\tailwm\"   # Where to save the batch file
-$logMappings = @{
+$batchFilePath = "$env:USERPROFILE\Tools\tailwm\"   # Where to save the files
+$configFileName = "tailwm.config" # Name of the companion configuration file
+
+# Sample log mappings (will be written to the config file if it doesn't exist)
+$defaultLogMappings = @{
     "myapp1" = "c:\program files\myapp1\log\server.log"
     "myapp2" = "c:\program files\myapp2\log\server.log"
     "myapp3" = "c:\program files\myapp3\log\server.log"
@@ -19,65 +22,126 @@ if (-not (Test-Path -Path $batchFilePath)) {
     Write-Host "Created directory: $batchFilePath" -ForegroundColor Green
 }
 
-# Build batch file content with a configurable variable
+# Define file paths
+$batchFile = Join-Path -Path $batchFilePath -ChildPath "tailwm.bat"
+$configFile = Join-Path -Path $batchFilePath -ChildPath $configFileName
+
+# Check if config file already exists and prompt for confirmation if it does
+$createConfigFile = $true
+if (Test-Path -Path $configFile) {
+    $response = Read-Host "Configuration file already exists. Do you want to overwrite it? (Y/N)"
+    $createConfigFile = $response -in 'Y', 'y', 'Yes', 'yes'
+}
+
+# Create the config file if needed
+if ($createConfigFile) {
+    # Build config file content
+    $configContent = "# TailWm configuration file`r`n"
+    $configContent += "# Format: ""appname"" = ""path\to\logfile.log""`r`n"
+    $configContent += "# Lines starting with # are ignored`r`n`r`n"
+    
+    foreach ($key in $defaultLogMappings.Keys) {
+        $value = $defaultLogMappings[$key]
+        $configContent += """$key"" = ""$value""`r`n"
+    }
+    
+    # Write config file
+    $configContent | Out-File -FilePath $configFile -Encoding UTF8 -Force
+    Write-Host "Created/Updated configuration file: $configFile" -ForegroundColor Green
+} else {
+    Write-Host "Keeping existing configuration file: $configFile" -ForegroundColor Cyan
+}
+
+# Build batch file content
 $batchContent = @"
 @echo off
 :: Configuration - Change this to your preferred log viewer
 set LOGTOOL=$tailToolName
+:: Log mapping logic using companion config file: $configFileName
 
-:: Log mapping logic below
+:: Check if config file exists
+if not exist "%~dp0$configFileName" (
+    echo Error: Configuration file not found: %~dp0$configFileName
+    echo Please run the TailWm setup script again to create it.
+    exit /b 1
+)
+
+:: Process the parameter
+if "%~1"=="" goto :help
+
+:: Read config file and find the requested log file
+setlocal EnableDelayedExpansion
+set FOUND=0
+for /f "usebackq tokens=1,2 delims==" %%a in ("%~dp0$configFileName") do (
+    set line=%%a
+    :: Skip comment lines
+    if not "!line:~0,1!"=="#" (
+        :: Remove quotes and trim spaces
+        set key=%%a
+        set key=!key:"=!
+        set key=!key: =!
+        
+        if "!key!"=="%~1" (
+            set FOUND=1
+            :: Remove quotes from the value
+            set logpath=%%b
+            set logpath=!logpath:"=!
+            set logpath=!logpath: =!
+            
+            :: Launch the log viewer
+            start "" %LOGTOOL% "!logpath!"
+            echo Tailing !logpath!
+            exit /b 0
+        )
+    )
+)
+
+if %FOUND%==0 (
+    echo Unknown logfile: %1
+    goto :help
+)
+exit /b 0
+
+:help
+echo Available options:
+for /f "usebackq tokens=1,2 delims==" %%a in ("%~dp0$configFileName") do (
+    set line=%%a
+    :: Skip comment lines
+    if not "!line:~0,1!"=="#" (
+        :: Remove quotes and trim spaces
+        set key=%%a
+        set key=!key:"=!
+        set key=!key: =!
+        
+        :: Remove quotes from the value
+        set logpath=%%b
+        set logpath=!logpath:"=!
+        set logpath=!logpath: =!
+        
+        echo !key!  --^> !logpath!
+    )
+)
+echo.
+echo Current log tool: %LOGTOOL%
+echo To change the log tool, edit the LOGTOOL variable at the top of this batch file
+echo To add more log files, edit the configuration file: %~dp0$configFileName
+exit /b 1
 "@
 
-# Add each app mapping
-$sortedKeys = $logMappings.Keys | Sort-Object
-$firstApp = $true
-
-foreach ($app in $sortedKeys) {
-    $logPath = $logMappings[$app]
-    if ($firstApp) {
-        $batchContent += "`r`nif ""%1""==""$app"" (`r`n"
-        $firstApp = $false
-    } else {
-        $batchContent += ") else if ""%1""==""$app"" (`r`n"
-    }
-
-    $batchContent += "    start """" %LOGTOOL% ""$logPath""`r`n"
-    $batchContent += "    echo Tailing $logPath`r`n"
-}
-
-# Add help section
-$batchContent += ") else (`r`n"
-$batchContent += "    echo Unknown logfile: %1`r`n"
-$batchContent += "    echo.`r`n"
-$batchContent += "    echo Available options:`r`n"
-
-# List available options one per line with the requested format
-foreach ($app in $sortedKeys) {
-    $logPath = $logMappings[$app]
-    $batchContent += "    echo $app  --^>  $logPath`r`n"
-}
-
-$batchContent += "    echo.`r`n"
-$batchContent += "    echo Current log tool: %LOGTOOL%`r`n"
-$batchContent += "    echo To change the log tool, edit the LOGTOOL variable at the top of this batch file`r`n"
-$batchContent += ")`r`n"
-
 # Check if batch file already exists and prompt for confirmation if it does
-$batchFile = Join-Path -Path $batchFilePath -ChildPath "tailwm.bat"
-$overwrite = $true
-
+$createBatchFile = $true
 if (Test-Path -Path $batchFile) {
     $response = Read-Host "Batch file already exists. Do you want to overwrite it? (Y/N)"
-    $overwrite = $response -in 'Y', 'y', 'Yes', 'yes'
+    $createBatchFile = $response -in 'Y', 'y', 'Yes', 'yes'
 }
 
-if ($overwrite) {
-    # Write batch file
+# Write batch file if confirmed
+if ($createBatchFile) {
     $batchContent | Out-File -FilePath $batchFile -Encoding ASCII -Force
     Write-Host "Created/Updated batch file: $batchFile" -ForegroundColor Green
     Write-Host "Default log tool set to: $tailToolName" -ForegroundColor Green
 } else {
-    Write-Host "Operation cancelled. Existing batch file was not modified." -ForegroundColor Yellow
+    Write-Host "Keeping existing batch file: $batchFile" -ForegroundColor Cyan
 }
 
 # Add to PATH if not already there
@@ -90,17 +154,25 @@ if ($currentPath -notlike "*$batchFilePath*") {
     Write-Host "$batchFilePath is already in PATH" -ForegroundColor Cyan
 }
 
-# Show usage information if we didn't cancel the operation
-if ($overwrite) {
-    Write-Host "`nSetup complete! You can now use:" -ForegroundColor Green
-    Write-Host "tailwm <logfile>" -ForegroundColor White
-    Write-Host "Where <logfile> is one of:" -ForegroundColor White
-    foreach ($app in $sortedKeys) {
-        $logPath = $logMappings[$app]
-        Write-Host "  $app  -->  $logPath" -ForegroundColor White
+# Show usage information
+Write-Host "`nSetup complete! You can now use:" -ForegroundColor Green
+Write-Host "tailwm <logfile>" -ForegroundColor White
+Write-Host "Where <logfile> is one of the entries in the configuration file:" -ForegroundColor White
+
+# Read and display the actual configuration file entries
+if (Test-Path -Path $configFile) {
+    $configEntries = Get-Content -Path $configFile | Where-Object { $_ -match '^\s*".*"\s*=\s*".*"' }
+    foreach ($entry in $configEntries) {
+        if ($entry -match '^\s*"(.*)"\s*=\s*"(.*)"') {
+            $app = $matches[1]
+            $logPath = $matches[2]
+            Write-Host "  $app  -->  $logPath" -ForegroundColor White
+        }
     }
-    Write-Host "`nTo change the log tool:" -ForegroundColor Cyan
-    Write-Host "Edit the LOGTOOL variable at the top of $batchFile" -ForegroundColor White
-    Write-Host "`nTo modify log mappings:" -ForegroundColor Cyan
-    Write-Host "Edit this script and run it again" -ForegroundColor White
 }
+
+Write-Host "`nTo change the log tool:" -ForegroundColor Cyan
+Write-Host "Edit the LOGTOOL variable at the top of $batchFile" -ForegroundColor White
+Write-Host "`nTo modify log mappings:" -ForegroundColor Cyan
+Write-Host "Edit the configuration file: $configFile" -ForegroundColor White
+Write-Host "Format: ""appname"" = ""path\to\logfile.log""" -ForegroundColor White
