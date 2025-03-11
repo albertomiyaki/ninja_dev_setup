@@ -31,12 +31,16 @@ function Test-IsAdmin {
 
 function Invoke-ElevatedScript {
     if (-not (Test-IsAdmin)) {
-        Write-Host "Elevating privileges to run as administrator..."
+        Write-Host "Elevating privileges to run as administrator..." -ForegroundColor Yellow
         Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
         exit
     }
 }
 
+function Wait-ForKeyPress {
+    Write-Host "`nPress any key to exit..." -ForegroundColor Yellow
+    $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+}
 
 # File Handling Functions
 
@@ -241,9 +245,11 @@ function Install-Product {
 
 # User Interface Functions
 
-function Show-Menu {
+function Show-MultiSelectMenu {
     param(
-        [array]$Products
+        [string]$Title,
+        [array]$Options,
+        [scriptblock]$DisplayFunction
     )
     
     $selectedIndices = @()
@@ -252,18 +258,31 @@ function Show-Menu {
     
     while (-not $exitMenu) {
         Clear-Host
-        Write-Host "=== Product Selection Menu ===" -ForegroundColor Cyan
-        Write-Host "Use arrow keys to navigate, Spacebar to select/deselect, A to select all, N to deselect all, Enter to confirm"
-        Write-Host ""
+        Write-Host "===================================" -ForegroundColor Cyan
+        Write-Host " $Title" -ForegroundColor Cyan
+        Write-Host "===================================" -ForegroundColor Cyan
         
-        for ($i = 0; $i -lt $Products.Count; $i++) {
-            $product = $Products[$i]
+        for ($i = 0; $i -lt $Options.Count; $i++) {
             $selected = $selectedIndices -contains $i
-            $indicator = if ($selected) { "[X]" } else { "[ ]" }
-            $highlight = if ($i -eq $currentIndex) { "->" } else { "  " }
+            $selectionIndicator = if ($selected) { "[X]" } else { "[ ]" }
             
-            Write-Host "$highlight $indicator $($product.Description)"
+            if ($i -eq $currentIndex) {
+                Write-Host " >> " -NoNewline -ForegroundColor Green
+                Write-Host "$selectionIndicator " -NoNewline -ForegroundColor Yellow
+                & $DisplayFunction $Options[$i] $true $selected
+            } else {
+                Write-Host "    " -NoNewline
+                Write-Host "$selectionIndicator " -NoNewline -ForegroundColor Gray
+                & $DisplayFunction $Options[$i] $false $selected
+            }
         }
+        
+        Write-Host "`nNavigation:" -ForegroundColor Cyan
+        Write-Host " ↑/↓      - Navigate up/down" -ForegroundColor Gray
+        Write-Host " Spacebar - Select/Deselect item" -ForegroundColor Gray
+        Write-Host " A        - Select All" -ForegroundColor Gray
+        Write-Host " N        - Select None" -ForegroundColor Gray
+        Write-Host " Enter    - Confirm and proceed" -ForegroundColor Gray
         
         $key = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         
@@ -271,23 +290,26 @@ function Show-Menu {
             38 { # Up arrow
                 if ($currentIndex -gt 0) {
                     $currentIndex--
+                } else {
+                    $currentIndex = $Options.Count - 1
                 }
             }
             40 { # Down arrow
-                if ($currentIndex -lt ($Products.Count - 1)) {
+                if ($currentIndex -lt ($Options.Count - 1)) {
                     $currentIndex++
+                } else {
+                    $currentIndex = 0
                 }
             }
             32 { # Spacebar
                 if ($selectedIndices -contains $currentIndex) {
                     $selectedIndices = $selectedIndices | Where-Object { $_ -ne $currentIndex }
-                }
-                else {
+                } else {
                     $selectedIndices += $currentIndex
                 }
             }
             65 { # 'A' key
-                $selectedIndices = @(0..($Products.Count - 1))
+                $selectedIndices = @(0..($Options.Count - 1))
             }
             78 { # 'N' key
                 $selectedIndices = @()
@@ -301,21 +323,37 @@ function Show-Menu {
     return $selectedIndices
 }
 
+function Display-ProductItem {
+    param(
+        [PSCustomObject]$Product,
+        [bool]$IsHighlighted,
+        [bool]$IsSelected
+    )
+    
+    if ($IsHighlighted) {
+        Write-Host "$($Product.Description)" -ForegroundColor White
+    } else {
+        Write-Host "$($Product.Description)" -ForegroundColor Gray
+    }
+}
+
 function Confirm-Selection {
     param(
         [array]$SelectedProducts
     )
     
     Clear-Host
-    Write-Host "=== Confirm Selection ===" -ForegroundColor Cyan
+    Write-Host "===================================" -ForegroundColor Cyan
+    Write-Host " Confirm Selection" -ForegroundColor Cyan
+    Write-Host "===================================" -ForegroundColor Cyan
     Write-Host "The following products will be installed:" -ForegroundColor Yellow
     
     foreach ($product in $SelectedProducts) {
-        Write-Host " - $($product.Description)"
+        Write-Host " • $($product.Description)" -ForegroundColor White
     }
     
-    Write-Host ""
-    $confirmation = Read-Host "Do you want to proceed? (Y/N)"
+    Write-Host "`nDo you want to proceed? (Y/N) " -NoNewline -ForegroundColor Yellow
+    $confirmation = Read-Host
     
     return $confirmation -eq "Y" -or $confirmation -eq "y"
 }
@@ -416,12 +454,13 @@ try {
     }
     
     # Show menu and get user selection
-    $selectedIndices = Show-Menu -Products $products
+    $selectedIndices = Show-MultiSelectMenu -Title "Product Selection" -Options $products -DisplayFunction ${function:Display-ProductItem}
     $selectedProducts = $selectedIndices | ForEach-Object { $products[$_] }
     
     # If no products selected, exit
     if ($selectedProducts.Count -eq 0) {
         Write-Host "No products selected. Exiting." -ForegroundColor Yellow
+        Wait-ForKeyPress
         exit
     }
     
@@ -430,6 +469,7 @@ try {
     
     if (-not $confirmed) {
         Write-Host "Installation cancelled by user." -ForegroundColor Yellow
+        Wait-ForKeyPress
         exit
     }
     
@@ -447,9 +487,16 @@ try {
     if ($passwordNeeded) {
         $passwordsMatch = $false
         while (-not $passwordsMatch) {
+            Write-Host "`n===================================" -ForegroundColor Cyan
+            Write-Host " Password Required" -ForegroundColor Cyan
+            Write-Host "===================================" -ForegroundColor Cyan
             Write-Host "Admin password is required for one or more products" -ForegroundColor Yellow
-            $securePassword = Read-Host "Enter admin password" -AsSecureString
-            $secureConfirmPassword = Read-Host "Confirm admin password" -AsSecureString
+            
+            Write-Host "Enter admin password: " -NoNewline -ForegroundColor Cyan
+            $securePassword = Read-Host -AsSecureString
+            
+            Write-Host "Confirm admin password: " -NoNewline -ForegroundColor Cyan
+            $secureConfirmPassword = Read-Host -AsSecureString
             
             # Convert secure strings to plain text for comparison
             $BSTR1 = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
@@ -478,6 +525,10 @@ try {
     # Install each selected product
     $results = @()
     $tempFiles = @()
+    
+    Write-Host "`n===================================" -ForegroundColor Cyan
+    Write-Host " Installation Progress" -ForegroundColor Cyan
+    Write-Host "===================================" -ForegroundColor Cyan
     
     foreach ($product in $selectedProducts) {
         $scriptPath = $product.Path
@@ -514,7 +565,9 @@ try {
     
     # Display summary
     Clear-Host
-    Write-Host "=== Installation Summary ===" -ForegroundColor Cyan
+    Write-Host "===================================" -ForegroundColor Cyan
+    Write-Host " Installation Summary" -ForegroundColor Cyan
+    Write-Host "===================================" -ForegroundColor Cyan
     
     $successCount = ($results | Where-Object { $_.Success }).Count
     $failCount = ($results | Where-Object { -not $_.Success }).Count
@@ -526,18 +579,23 @@ try {
     if ($failCount -gt 0) {
         Write-Host "Failed Products:" -ForegroundColor Red
         $results | Where-Object { -not $_.Success } | ForEach-Object {
-            Write-Host " - $($_.Product)" -ForegroundColor Red
+            Write-Host " • $($_.Product)" -ForegroundColor Red
         }
+        Write-Host ""
     }
     
     if ($successCount -gt 0) {
         Write-Host "Successful Products:" -ForegroundColor Green
         $results | Where-Object { $_.Success } | ForEach-Object {
-            Write-Host " - $($_.Product)" -ForegroundColor Green
+            Write-Host " • $($_.Product)" -ForegroundColor Green
         }
     }
+    
+    # Wait for user to press a key before exiting
+    Wait-ForKeyPress
 }
 catch {
     Write-Host "Error: $_" -ForegroundColor Red
+    Wait-ForKeyPress
     exit 1
 }
