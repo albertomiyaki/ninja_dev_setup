@@ -74,7 +74,7 @@ function Show-Menu {
             }
         }
         
-        Write-Host "(Use ↑ and ↓ arrow keys to navigate, press Enter to select)" -ForegroundColor Gray
+        Write-Host "(Use up and down arrow keys to navigate, press Enter to select)" -ForegroundColor Gray
         
         $key = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         
@@ -106,10 +106,30 @@ function Display-Certificate {
     $subject = $Certificate.Subject
     $issuer = $Certificate.Issuer
     $thumbprint = $Certificate.Thumbprint
-    $expiration = $Certificate.NotAfter.ToString("yyyy-MM-dd")
-    $keyType = "Unknown"
+    $validFrom = $Certificate.NotBefore.ToString("yyyy-MM-dd")
+    $validTo = $Certificate.NotAfter.ToString("yyyy-MM-dd")
+    
+    # Calculate days until expiration
+    $daysUntilExpiration = [math]::Ceiling(($Certificate.NotAfter - (Get-Date)).TotalDays)
+    $expirationMessage = if ($daysUntilExpiration -lt 0) {
+        "EXPIRED ($daysUntilExpiration days ago)"
+    } elseif ($daysUntilExpiration -lt 30) {
+        "$daysUntilExpiration days (EXPIRING SOON)"
+    } else {
+        "$daysUntilExpiration days"
+    }
+    
+    # Apply color coding for expiration status
+    $expirationColor = if ($daysUntilExpiration -lt 0) {
+        "Red"
+    } elseif ($daysUntilExpiration -lt 30) {
+        "Yellow"
+    } else {
+        $color
+    }
     
     # Try to determine key type
+    $keyType = "Unknown"
     try {
         if ($Certificate.HasPrivateKey) {
             if ([System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Certificate)) {
@@ -126,14 +146,64 @@ function Display-Certificate {
         # Ignore errors when determining key type
     }
     
+    # Get enhanced key usage
+    $enhancedKeyUsage = "None"
+    try {
+        $ekuExtension = $Certificate.Extensions | Where-Object { $_ -is [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension] }
+        if ($ekuExtension) {
+            $ekuOids = $ekuExtension.EnhancedKeyUsages
+            
+            # Common OIDs for reference
+            $clientAuthOid = "1.3.6.1.5.5.7.3.2"
+            $serverAuthOid = "1.3.6.1.5.5.7.3.1"
+            
+            if ($ekuOids.Count -eq 0) {
+                $enhancedKeyUsage = "None"
+            } elseif ($ekuOids.Count -gt 5) {
+                $enhancedKeyUsage = "Multiple purposes ($($ekuOids.Count) usages)"
+            } else {
+                $usages = @()
+                
+                # Check for common OIDs
+                $hasClientAuth = $ekuOids.Value -contains $clientAuthOid
+                $hasServerAuth = $ekuOids.Value -contains $serverAuthOid
+                
+                if ($hasClientAuth -and $hasServerAuth) {
+                    $usages += "Client & Server Authentication"
+                } elseif ($hasClientAuth) {
+                    $usages += "Client Authentication"
+                } elseif ($hasServerAuth) {
+                    $usages += "Server Authentication"
+                }
+                
+                # Add any other OIDs not already accounted for
+                foreach ($oid in $ekuOids) {
+                    if ($oid.Value -ne $clientAuthOid -and $oid.Value -ne $serverAuthOid) {
+                        $usages += $oid.FriendlyName
+                    }
+                }
+                
+                $enhancedKeyUsage = $usages -join ", "
+            }
+        }
+    } catch {
+        $enhancedKeyUsage = "Error determining usage"
+    }
+    
     # Format the subject for better display
     $subjectCN = if ($subject -match "CN=([^,]+)") { $matches[1] } else { $subject }
     
     Write-Host "$subjectCN" -ForegroundColor $color
     Write-Host "      Thumbprint: $thumbprint" -ForegroundColor $color
     Write-Host "      Key Type: $keyType" -ForegroundColor $color
-    Write-Host "      Expiration: $expiration" -ForegroundColor $color
+    Write-Host "      Validity: $validFrom to $validTo" -ForegroundColor $color
+    Write-Host "      Expires in: " -ForegroundColor $color -NoNewline
+    Write-Host $expirationMessage -ForegroundColor $expirationColor
+    Write-Host "      Enhanced Key Usage: $enhancedKeyUsage" -ForegroundColor $color
     Write-Host "      Issuer: $issuer" -ForegroundColor $color
+    
+    # Add empty line for better readability
+    Write-Host ""
 }
 
 function Display-StoreOption {
@@ -427,6 +497,59 @@ Export-CertificateToPfxWithKeytool -Certificate $selectedCert -Password $passwor
 $logDirectory = Split-Path -Path $filePath -Parent
 $logFile = Join-Path -Path $logDirectory -ChildPath "certificate_export_log.txt"
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+
+# Get Enhanced Key Usage information for the log
+$ekuInfo = "None"
+try {
+    $ekuExtension = $selectedCert.Extensions | Where-Object { $_ -is [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension] }
+    if ($ekuExtension) {
+        $ekuOids = $ekuExtension.EnhancedKeyUsages
+        
+        # Common OIDs for reference
+        $clientAuthOid = "1.3.6.1.5.5.7.3.2"
+        $serverAuthOid = "1.3.6.1.5.5.7.3.1"
+        
+        if ($ekuOids.Count -eq 0) {
+            $ekuInfo = "None"
+        } else {
+            $usages = @()
+            
+            # Check for common OIDs
+            $hasClientAuth = $ekuOids.Value -contains $clientAuthOid
+            $hasServerAuth = $ekuOids.Value -contains $serverAuthOid
+            
+            if ($hasClientAuth -and $hasServerAuth) {
+                $usages += "Client & Server Authentication"
+            } elseif ($hasClientAuth) {
+                $usages += "Client Authentication"
+            } elseif ($hasServerAuth) {
+                $usages += "Server Authentication"
+            }
+            
+            # Add any other OIDs not already accounted for
+            foreach ($oid in $ekuOids) {
+                if ($oid.Value -ne $clientAuthOid -and $oid.Value -ne $serverAuthOid) {
+                    $usages += $oid.FriendlyName
+                }
+            }
+            
+            $ekuInfo = $usages -join ", "
+        }
+    }
+} catch {
+    $ekuInfo = "Error determining usage"
+}
+
+# Calculate days until expiration
+$daysUntilExpiration = [math]::Ceiling(($selectedCert.NotAfter - (Get-Date)).TotalDays)
+$expirationInfo = if ($daysUntilExpiration -lt 0) {
+    "EXPIRED ($daysUntilExpiration days ago)"
+} elseif ($daysUntilExpiration -lt 30) {
+    "$daysUntilExpiration days (EXPIRING SOON)"
+} else {
+    "$daysUntilExpiration days remaining"
+}
+
 $logMessage = @"
 [$timestamp] Certificate Export Details:
 - File Path: $filePath
@@ -434,7 +557,9 @@ $logMessage = @"
 - Thumbprint: $($selectedCert.Thumbprint)
 - Key Alias: $commonName
 - Algorithm: $selectedAlgorithm
-- Expiration Date: $($selectedCert.NotAfter.ToString("yyyy-MM-dd"))
+- Validity Period: $($selectedCert.NotBefore.ToString("yyyy-MM-dd")) to $($selectedCert.NotAfter.ToString("yyyy-MM-dd"))
+- Expiration Status: $expirationInfo
+- Enhanced Key Usage: $ekuInfo
 "@
 
 try {
