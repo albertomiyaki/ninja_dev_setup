@@ -41,25 +41,44 @@ foreach ($app in $sortedKeys) {
         $batchContent += ") else if ""%1""==""$app"" (`r`n"
     }
 
-    # Use START command to run in background
     $batchContent += "    start """" %LOGTOOL% ""$logPath""`r`n"
+    $batchContent += "    echo Tailing $logPath`r`n"
 }
 
 # Add help section
 $batchContent += ") else (`r`n"
 $batchContent += "    echo Unknown logfile: %1`r`n"
-$batchContent += "    echo Available options: $($logMappings.Keys -join ', ')`r`n"
+$batchContent += "    echo.`r`n"
+$batchContent += "    echo Available options:`r`n"
+
+# List available options one per line with the requested format
+foreach ($app in $sortedKeys) {
+    $logPath = $logMappings[$app]
+    $batchContent += "    echo $app  --^>  $logPath`r`n"
+}
+
 $batchContent += "    echo.`r`n"
 $batchContent += "    echo Current log tool: %LOGTOOL%`r`n"
 $batchContent += "    echo To change the log tool, edit the LOGTOOL variable at the top of this batch file`r`n"
 $batchContent += ")`r`n"
 
-# Write batch file
+# Check if batch file already exists and prompt for confirmation if it does
 $batchFile = Join-Path -Path $batchFilePath -ChildPath "tailwm.bat"
-$batchContent | Out-File -FilePath $batchFile -Encoding ASCII -Force
+$overwrite = $true
 
-Write-Host "Created batch file: $batchFile" -ForegroundColor Green
-Write-Host "Default log tool set to: $tailToolName" -ForegroundColor Green
+if (Test-Path -Path $batchFile) {
+    $response = Read-Host "Batch file already exists. Do you want to overwrite it? (Y/N)"
+    $overwrite = $response -in 'Y', 'y', 'Yes', 'yes'
+}
+
+if ($overwrite) {
+    # Write batch file
+    $batchContent | Out-File -FilePath $batchFile -Encoding ASCII -Force
+    Write-Host "Created/Updated batch file: $batchFile" -ForegroundColor Green
+    Write-Host "Default log tool set to: $tailToolName" -ForegroundColor Green
+} else {
+    Write-Host "Operation cancelled. Existing batch file was not modified." -ForegroundColor Yellow
+}
 
 # Add to PATH if not already there
 $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
@@ -71,11 +90,17 @@ if ($currentPath -notlike "*$batchFilePath*") {
     Write-Host "$batchFilePath is already in PATH" -ForegroundColor Cyan
 }
 
-# Show usage information
-Write-Host "`nSetup complete! You can now use:" -ForegroundColor Green
-Write-Host "tailwm <logfile>" -ForegroundColor White
-Write-Host "Where <logfile> is one of: $($logMappings.Keys -join ', ')" -ForegroundColor White
-Write-Host "`nTo change the log tool:" -ForegroundColor Cyan
-Write-Host "Edit the LOGTOOL variable at the top of $batchFile" -ForegroundColor White
-Write-Host "`nTo modify log mappings:" -ForegroundColor Cyan
-Write-Host "Edit this script and run it again" -ForegroundColor White
+# Show usage information if we didn't cancel the operation
+if ($overwrite) {
+    Write-Host "`nSetup complete! You can now use:" -ForegroundColor Green
+    Write-Host "tailwm <logfile>" -ForegroundColor White
+    Write-Host "Where <logfile> is one of:" -ForegroundColor White
+    foreach ($app in $sortedKeys) {
+        $logPath = $logMappings[$app]
+        Write-Host "  $app  -->  $logPath" -ForegroundColor White
+    }
+    Write-Host "`nTo change the log tool:" -ForegroundColor Cyan
+    Write-Host "Edit the LOGTOOL variable at the top of $batchFile" -ForegroundColor White
+    Write-Host "`nTo modify log mappings:" -ForegroundColor Cyan
+    Write-Host "Edit this script and run it again" -ForegroundColor White
+}
