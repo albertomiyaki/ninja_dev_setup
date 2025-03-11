@@ -65,6 +65,7 @@ function Get-GitConfig {
         $eol = git config --global core.eol 2>$null
         $colorUI = git config --global color.ui 2>$null
         $pushDefault = git config --global push.default 2>$null
+        $sslVerify = git config --global http.sslVerify 2>$null
         
         # Get aliases
         $aliases = @{}
@@ -91,6 +92,7 @@ function Get-GitConfig {
             EOL = if ([string]::IsNullOrWhiteSpace($eol)) { "native" } else { $eol }
             ColorUI = if ([string]::IsNullOrWhiteSpace($colorUI)) { "auto" } else { $colorUI }
             PushDefault = if ([string]::IsNullOrWhiteSpace($pushDefault)) { "simple" } else { $pushDefault }
+            SSLVerify = if ([string]::IsNullOrWhiteSpace($sslVerify)) { "true" } else { $sslVerify }
             Aliases = $aliases
         }
         
@@ -109,6 +111,7 @@ function Get-GitConfig {
             AutoCRLF = "true"
             ColorUI = "auto"
             PushDefault = "simple"
+            SSLVerify = "true"
             Aliases = @{
                 "st" = "status"
                 "ci" = "commit -m"
@@ -161,6 +164,9 @@ function Set-GitConfig {
         
         Write-GitLog "Setting push.default to $($Config.PushDefault)" -Type Information
         git config --global push.default $($Config.PushDefault)
+        
+        Write-GitLog "Setting http.sslVerify to $($Config.SSLVerify)" -Type Information
+        git config --global http.sslVerify $($Config.SSLVerify)
         
         # Aliases
         if ($Config.Aliases -and $Config.Aliases.Count -gt 0) {
@@ -564,6 +570,15 @@ function Edit-GitAliases {
                             <ComboBoxItem Content="native"/>
                         </ComboBox>
                         
+                        <TextBlock Text="SSL Certificate Verification" FontWeight="Medium" Margin="0,0,0,5"/>
+                        <ComboBox x:Name="SSLVerifyComboBox" Style="{StaticResource ConfigComboBox}">
+                            <ComboBoxItem Content="true"/>
+                            <ComboBoxItem Content="false"/>
+                        </ComboBox>
+                        <TextBlock FontStyle="Italic" TextWrapping="Wrap" Margin="0,0,0,10" Foreground="#666666">
+                            Warning: Setting SSL Verify to "false" disables important security checks. Only use in controlled environments.
+                        </TextBlock>
+                        
                         <TextBlock Text="Color UI" FontWeight="Medium" Margin="0,0,0,5"/>
                         <ComboBox x:Name="ColorUIComboBox" Style="{StaticResource ConfigComboBox}">
                             <ComboBoxItem Content="auto"/>
@@ -675,6 +690,7 @@ $sync.CredentialHelperComboBox = $window.FindName("CredentialHelperComboBox")
 $sync.AutoCRLFComboBox = $window.FindName("AutoCRLFComboBox")
 $sync.ColorUIComboBox = $window.FindName("ColorUIComboBox")
 $sync.PushDefaultComboBox = $window.FindName("PushDefaultComboBox")
+$sync.SSLVerifyComboBox = $window.FindName("SSLVerifyComboBox")
 $sync.AliasesTextBlock = $window.FindName("AliasesTextBlock")
 $sync.EditAliasesButton = $window.FindName("EditAliasesButton")
 
