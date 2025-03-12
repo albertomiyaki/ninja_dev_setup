@@ -78,7 +78,7 @@ function Show-MultiSelectMenu {
         Write-Host "`nSelected: $($selectedIndices.Count) of $($Options.Count)" -ForegroundColor Magenta
         
         Write-Host "`nNavigation:" -ForegroundColor Cyan
-        Write-Host " Up/Down      - Navigate up/down" -ForegroundColor Gray
+        Write-Host " Up/Down  - Navigate up/down" -ForegroundColor Gray
         Write-Host " Spacebar - Select/Deselect item" -ForegroundColor Gray
         Write-Host " A        - Select All" -ForegroundColor Gray
         Write-Host " N        - Select None" -ForegroundColor Gray
@@ -191,20 +191,24 @@ function Add-ToQuickAccess {
         [string]$Path
     )
     
+    # Create a Shell application object to work with Quick Access
+    $shellObj = $null
+    
     try {
         # Validate the path
         if (-not (Test-PathExists -Path $Path)) {
             return @{
                 Success = $false
                 Message = "Path not found or not accessible"
+                Shell = $null
             }
         }
         
         # Create a Shell application object to work with Quick Access
-        $shell = New-Object -ComObject Shell.Application
+        $shellObj = New-Object -ComObject Shell.Application
         
         # Get the Quick Access folder (namespace 1 = Quick Access)
-        $quickAccess = $shell.Namespace(1)
+        $quickAccess = $shellObj.Namespace(1)
         
         # Check if path is already in Quick Access by comparing titles
         $pathName = Split-Path $Path -Leaf
@@ -222,16 +226,18 @@ function Add-ToQuickAccess {
                 Success = $true
                 Message = "Path is already in Quick Access"
                 AlreadyPinned = $true
+                Shell = $shellObj
             }
         }
         
         # Create a folder object for the path
-        $folder = $shell.Namespace(0).ParseName($Path)
+        $folder = $shellObj.Namespace(0).ParseName($Path)
         
         if ($null -eq $folder) {
             return @{
                 Success = $false
                 Message = "Failed to get folder object for the path"
+                Shell = $shellObj
             }
         }
         
@@ -243,12 +249,14 @@ function Add-ToQuickAccess {
             Success = $true
             Message = "Successfully added to Quick Access"
             AlreadyPinned = $false
+            Shell = $shellObj
         }
     }
     catch {
         return @{
             Success = $false
             Message = "Error: $_"
+            Shell = $shellObj
         }
     }
 }
@@ -345,10 +353,16 @@ try {
     $skippedCount = 0
     $failedCount = 0
     $results = @()
+    $shellObjects = @()
     
     foreach ($path in $selectedPaths) {
         Write-Host "`nProcessing: $($path.Name) ($($path.Path))" -ForegroundColor Yellow
         $result = Add-ToQuickAccess -Path $path.Path
+        
+        # Store Shell COM object for cleanup
+        if ($null -ne $result.Shell) {
+            $shellObjects += $result.Shell
+        }
         
         if ($result.Success) {
             if ($result.AlreadyPinned) {
@@ -410,7 +424,19 @@ try {
     }
     
     # Clean up COM objects
-    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shell) | Out-Null
+    Write-Host "`nCleaning up COM objects..." -ForegroundColor DarkGray
+    foreach ($shellObj in $shellObjects) {
+        if ($null -ne $shellObj) {
+            try {
+                [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shellObj) | Out-Null
+            }
+            catch {
+                Write-Host "Warning: Failed to release COM object: $_" -ForegroundColor Yellow
+            }
+        }
+    }
+    
+    # Force garbage collection
     [System.GC]::Collect()
     [System.GC]::WaitForPendingFinalizers()
     
