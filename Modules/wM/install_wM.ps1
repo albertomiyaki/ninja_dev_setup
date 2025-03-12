@@ -6,6 +6,13 @@ param(
     [string]$ConfigFile = "install_wM_config.json"
 )
 
+# Create a synchronized hashtable for timing data
+$timingData = @{
+    OverallStartTime = $null
+    OverallEndTime = $null
+    ProductInstallTimes = @{}  # Store duration of each product installation
+}
+
 # Helper Functions
 
 function Get-ScriptDirectory {
@@ -40,6 +47,23 @@ function Invoke-ElevatedScript {
 function Wait-ForKeyPress {
     Write-Host "`nPress any key to exit..." -ForegroundColor Yellow
     $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+}
+
+function Format-Duration {
+    param(
+        [TimeSpan]$Duration
+    )
+    
+    return "{0:mm\:ss\.fff}" -f $Duration
+}
+
+function Format-OverallDuration {
+    param(
+        [TimeSpan]$Duration
+    )
+    
+    # Use hours if the duration is long
+    return "{0:hh\:mm\:ss\.fff}" -f $Duration
 }
 
 # File Handling Functions
@@ -220,24 +244,47 @@ function Install-Product {
     param(
         [string]$InstallerPath,
         [string]$ScriptPath,
-        [string]$InstallerArgument
+        [string]$InstallerArgument,
+        [string]$ProductName
     )
     
     try {
-        Write-Host "Installing using script: $ScriptPath..." -ForegroundColor Cyan
+        # Start timing the installation
+        $startTime = Get-Date
+        
+        Write-Host "Installing $ProductName..." -ForegroundColor Cyan
+        Write-Host "Using script: $ScriptPath" -ForegroundColor Cyan
         Write-Host "Using installer: $InstallerPath" -ForegroundColor Cyan
+        
         $process = Start-Process -FilePath $InstallerPath -ArgumentList "$InstallerArgument `"$ScriptPath`"" -Wait -PassThru -NoNewWindow
         
+        # End timing and calculate duration
+        $endTime = Get-Date
+        $duration = $endTime - $startTime
+        $formattedDuration = Format-Duration -Duration $duration
+        
+        # Store the duration
+        $timingData.ProductInstallTimes[$ProductName] = $duration
+        
         if ($process.ExitCode -eq 0) {
+            Write-Host "[SUCCESS] $ProductName installed successfully! (Duration: $formattedDuration)" -ForegroundColor Green
             return $true
         }
         else {
-            Write-Host "Installation failed with exit code: $($process.ExitCode)" -ForegroundColor Red
+            Write-Host "[FAILED] Installation of $ProductName failed with exit code: $($process.ExitCode) (Duration: $formattedDuration)" -ForegroundColor Red
             return $false
         }
     }
     catch {
-        Write-Host "Error running installer: $_" -ForegroundColor Red
+        # End timing even when there's an error
+        $endTime = Get-Date
+        $duration = $endTime - $startTime
+        $formattedDuration = Format-Duration -Duration $duration
+        
+        # Store the duration
+        $timingData.ProductInstallTimes[$ProductName] = $duration
+        
+        Write-Host "[ERROR] Error running installer for $ProductName: $_ (Duration: $formattedDuration)" -ForegroundColor Red
         return $false
     }
 }
@@ -278,7 +325,7 @@ function Show-MultiSelectMenu {
         }
         
         Write-Host "`nNavigation:" -ForegroundColor Cyan
-        Write-Host " ↑/↓      - Navigate up/down" -ForegroundColor Gray
+        Write-Host " Up/Down  - Navigate up/down" -ForegroundColor Gray
         Write-Host " Spacebar - Select/Deselect item" -ForegroundColor Gray
         Write-Host " A        - Select All" -ForegroundColor Gray
         Write-Host " N        - Select None" -ForegroundColor Gray
@@ -356,6 +403,69 @@ function Confirm-Selection {
     $confirmation = Read-Host
     
     return $confirmation -eq "Y" -or $confirmation -eq "y"
+}
+
+function Show-InstallationSummary {
+    param(
+        [array]$Results,
+        [hashtable]$TimingData
+    )
+    
+    Clear-Host
+    
+    $successCount = ($Results | Where-Object { $_.Success }).Count
+    $failCount = ($Results | Where-Object { -not $_.Success }).Count
+    $overallDuration = $TimingData.OverallEndTime - $TimingData.OverallStartTime
+    $formattedOverallDuration = Format-OverallDuration -Duration $overallDuration
+    
+    # Create a nice bordered summary with ASCII characters
+    Write-Host "+----------------------------------------------------------+" -ForegroundColor Cyan
+    Write-Host "|                  INSTALLATION SUMMARY                    |" -ForegroundColor Cyan
+    Write-Host "+----------------------------------------------------------+" -ForegroundColor Cyan
+    Write-Host "| Total Duration: $formattedOverallDuration                          |" -ForegroundColor White
+    Write-Host "| Products:       $($successCount + $failCount)                                      |" -ForegroundColor White
+    Write-Host "| Successful:     $successCount                                      |" -ForegroundColor Green
+    Write-Host "| Failed:         $failCount                                      |" -ForegroundColor $(if ($failCount -gt 0) { "Red" } else { "White" })
+    Write-Host "+----------------------------------------------------------+" -ForegroundColor Cyan
+    
+    # Display successful products with timing
+    if ($successCount -gt 0) {
+        Write-Host "| SUCCESSFUL INSTALLATIONS:                              |" -ForegroundColor Green
+        $successful = $Results | Where-Object { $_.Success }
+        foreach ($item in $successful) {
+            $duration = $TimingData.ProductInstallTimes[$item.Product]
+            $formattedDuration = Format-Duration -Duration $duration
+            $product = $item.Product
+            # Truncate long product names to fit in the box
+            if ($product.Length -gt 35) {
+                $product = $product.Substring(0, 32) + "..."
+            }
+            $spaceCount = 46 - ($product.Length + $formattedDuration.Length)
+            $spaces = " " * $spaceCount
+            Write-Host "| * $product$spaces$formattedDuration |" -ForegroundColor Green
+        }
+    }
+    
+    # Display failed products with timing
+    if ($failCount -gt 0) {
+        Write-Host "+----------------------------------------------------------+" -ForegroundColor Cyan
+        Write-Host "| FAILED INSTALLATIONS:                                  |" -ForegroundColor Red
+        $failed = $Results | Where-Object { -not $_.Success }
+        foreach ($item in $failed) {
+            $duration = $TimingData.ProductInstallTimes[$item.Product]
+            $formattedDuration = Format-Duration -Duration $duration
+            $product = $item.Product
+            # Truncate long product names to fit in the box
+            if ($product.Length -gt 35) {
+                $product = $product.Substring(0, 32) + "..."
+            }
+            $spaceCount = 46 - ($product.Length + $formattedDuration.Length)
+            $spaces = " " * $spaceCount
+            Write-Host "| * $product$spaces$formattedDuration |" -ForegroundColor Red
+        }
+    }
+    
+    Write-Host "+----------------------------------------------------------+" -ForegroundColor Cyan
 }
 
 
@@ -522,6 +632,9 @@ try {
         }
     }
     
+    # Start overall timing
+    $timingData.OverallStartTime = Get-Date
+    
     # Install each selected product
     $results = @()
     $tempFiles = @()
@@ -545,12 +658,15 @@ try {
         }
         
         # Run the installer with the appropriate script path
-        $success = Install-Product -InstallerPath $installerPath -ScriptPath $scriptPath -InstallerArgument $installerArgs
+        $success = Install-Product -InstallerPath $installerPath -ScriptPath $scriptPath -InstallerArgument $installerArgs -ProductName $product.Description
         $results += @{
             Product = $product.Description
             Success = $success
         }
     }
+    
+    # End overall timing
+    $timingData.OverallEndTime = Get-Date
     
     # Clean up any temp files
     foreach ($tempFile in $tempFiles) {
@@ -563,33 +679,8 @@ try {
     # Clear the password from memory
     $adminPassword = $null
     
-    # Display summary
-    Clear-Host
-    Write-Host "===================================" -ForegroundColor Cyan
-    Write-Host " Installation Summary" -ForegroundColor Cyan
-    Write-Host "===================================" -ForegroundColor Cyan
-    
-    $successCount = ($results | Where-Object { $_.Success }).Count
-    $failCount = ($results | Where-Object { -not $_.Success }).Count
-    
-    Write-Host "Successful: $successCount" -ForegroundColor Green
-    Write-Host "Failed: $failCount" -ForegroundColor Red
-    Write-Host ""
-    
-    if ($failCount -gt 0) {
-        Write-Host "Failed Products:" -ForegroundColor Red
-        $results | Where-Object { -not $_.Success } | ForEach-Object {
-            Write-Host " • $($_.Product)" -ForegroundColor Red
-        }
-        Write-Host ""
-    }
-    
-    if ($successCount -gt 0) {
-        Write-Host "Successful Products:" -ForegroundColor Green
-        $results | Where-Object { $_.Success } | ForEach-Object {
-            Write-Host " • $($_.Product)" -ForegroundColor Green
-        }
-    }
+    # Display detailed summary with timing information
+    Show-InstallationSummary -Results $results -TimingData $timingData
     
     # Wait for user to press a key before exiting
     Wait-ForKeyPress

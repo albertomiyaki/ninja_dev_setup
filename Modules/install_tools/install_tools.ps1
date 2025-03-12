@@ -538,7 +538,8 @@ function Install-Tool {
 # Function to install selected tools
 function Install-SelectedTools {
     param (
-        [array]$SelectedTools
+        [array]$SelectedTools,
+        [switch]$SkipConfirmation = $false
     )
     
     if ($SelectedTools.Count -eq 0) {
@@ -548,6 +549,22 @@ function Install-SelectedTools {
     }
     
     try {
+        # Skip confirmation if it's a double-click or if explicitly skipped
+        if (-not $SkipConfirmation) {
+            # Confirm installation
+            $confirmResult = [System.Windows.MessageBox]::Show(
+                "Are you sure you want to install $($SelectedTools.Count) selected tools?",
+                "Confirm Installation",
+                [System.Windows.MessageBoxButton]::YesNo,
+                [System.Windows.MessageBoxImage]::Question
+            )
+            
+            if ($confirmResult -ne [System.Windows.MessageBoxResult]::Yes) {
+                Write-ToolLog "Installation cancelled by user" -Type Information
+                return
+            }
+        }
+        
         # Reset installation times
         $sync.InstallationTimes = @{}
         
@@ -708,7 +725,7 @@ function Install-SelectedTools {
                       BorderBrush="#CCCCCC"
                       Padding="0"
                       FontSize="14"
-                      SelectionMode="Multiple">
+                      SelectionMode="Extended">
                 <ListView.Resources>
                     <Style TargetType="{x:Type ListViewItem}">
                         <Setter Property="Padding" Value="10,8"/>
@@ -884,20 +901,8 @@ $sync.InstallButton.Add_Click({
         return
     }
     
-    # Confirm installation
-    $confirmResult = [System.Windows.MessageBox]::Show(
-        "Are you sure you want to install $($selectedItems.Count) selected tools?",
-        "Confirm Installation",
-        [System.Windows.MessageBoxButton]::YesNo,
-        [System.Windows.MessageBoxImage]::Question
-    )
-    
-    if ($confirmResult -eq [System.Windows.MessageBoxResult]::Yes) {
-        Install-SelectedTools -SelectedTools $selectedItems
-    }
-    else {
-        Write-ToolLog "Installation cancelled by user" -Type Information
-    }
+    # Call the installation function
+    Install-SelectedTools -SelectedTools $selectedItems -SkipConfirmation:$false
 })
 
 # Selection changed event
@@ -936,6 +941,23 @@ $sync.ToolListView.Add_SelectionChanged({
         $sync.SelectedToolCount.Text = "No tools selected"
         $sync.SelectedToolDetails.Text = ""
         $sync.InstallButton.IsEnabled = $false
+    }
+})
+
+$sync.ToolListView.Add_MouseDoubleClick({
+    # Get the selected item that was double-clicked
+    $selectedItem = $sync.ToolListView.SelectedItem
+    
+    if ($null -ne $selectedItem) {
+        # Create an array with just this one item
+        $itemsToInstall = @($selectedItem)
+        
+        # Install the selected tool without confirmation prompt
+        Write-ToolLog "Double-click detected on $($selectedItem.Name). Starting installation..." -Type Information
+        $sync.StatusBar.Text = "Installing $($selectedItem.Name)..."
+        
+        # Call installation function with the single item
+        Install-SelectedTools -SelectedTools $itemsToInstall
     }
 })
 

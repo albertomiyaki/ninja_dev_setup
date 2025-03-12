@@ -247,7 +247,7 @@ else {
 }
 
 # Default clone directory
-$defaultCloneDir = Join-Path $env:USERPROFILE "GitHub_${orgName}_repos"
+$defaultCloneDir = Join-Path $env:USERPROFILE "git"
 $cloneDir = Read-Host "Enter the directory to clone repositories into (default: $defaultCloneDir)"
 
 if ([string]::IsNullOrWhiteSpace($cloneDir)) {
@@ -308,21 +308,25 @@ try {
     
     foreach ($repo in $selectedRepos) {
         $repoName = $repo.Name
-        $localRepoPath = Join-Path $cloneDir $repoName.Split('/')[-1]
+        # Extract just the repository name without the organization prefix
+        $repoNameOnly = $repoName.Split('/')[-1]
+        $localRepoPath = Join-Path $cloneDir $repoNameOnly
         
         # Check if repo already exists locally
         if (Test-Path $localRepoPath) {
-            Write-ColorMessage "Repository '$repoName' already exists in $localRepoPath, skipping..." -Level Warning
+            Write-ColorMessage "Repository '$repoNameOnly' already exists in $localRepoPath, skipping..." -Level Warning
             continue
         }
         
-        Write-ColorMessage "Cloning $repoName..." -Level Info
+        Write-ColorMessage "Cloning $repoName to $localRepoPath..." -Level Info
         
         try {
-            gh repo clone $repoName $repoName
+            # Clone directly to the specified location using the --clone-dir parameter
+            # Format: gh repo clone ORG/REPO DESTINATION
+            gh repo clone "$repoName" "$localRepoPath"
             
             if ($LASTEXITCODE -eq 0) {
-                Write-ColorMessage "Successfully cloned $repoName" -Level Success
+                Write-ColorMessage "Successfully cloned $repoName to $localRepoPath" -Level Success
                 $successCount++
             } else {
                 Write-ColorMessage "Failed to clone $repoName" -Level Error
@@ -343,7 +347,7 @@ try {
     Write-Host "==========================================" -ForegroundColor Cyan
     Write-ColorMessage "Successfully cloned: $successCount repositories" -Level Success
     Write-ColorMessage "Failed to clone: $failCount repositories" -Level $(if ($failCount -gt 0) { "Error" } else { "Info" })
-    Write-ColorMessage "All repositories were cloned to: $cloneDir" -Level Info
+    Write-ColorMessage "All repositories were cloned directly to: $cloneDir" -Level Info
     
 }
 catch {

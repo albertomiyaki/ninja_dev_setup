@@ -1,6 +1,23 @@
-# Add to Quick Access
+# Add to Environment PATH
+# 
+# Reads paths from add_to_env_path_config.json and adds selected ones to the system PATH
+# First copies itself to the Tools directory to avoid committing changes back to the repo
 
-# Reads paths from add_quick_access_paths_config.json and adds selected ones to Windows Quick Access
+# Function to check if running as administrator
+function Test-IsAdmin {
+    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# Function to elevate script if needed
+function Invoke-ElevatedScript {
+    if (-not (Test-IsAdmin)) {
+        Write-Host "Elevating privileges to run as administrator..." -ForegroundColor Yellow
+        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+        exit
+    }
+}
 
 # Function to wait for keypress before exiting
 function Wait-ForKeyPress {
@@ -78,7 +95,7 @@ function Show-MultiSelectMenu {
         Write-Host "`nSelected: $($selectedIndices.Count) of $($Options.Count)" -ForegroundColor Magenta
         
         Write-Host "`nNavigation:" -ForegroundColor Cyan
-        Write-Host " Up/Down      - Navigate up/down" -ForegroundColor Gray
+        Write-Host " Up/Down  - Navigate up/down" -ForegroundColor Gray
         Write-Host " Spacebar - Select/Deselect item" -ForegroundColor Gray
         Write-Host " A        - Select All" -ForegroundColor Gray
         Write-Host " N        - Select None" -ForegroundColor Gray
@@ -137,7 +154,7 @@ function Confirm-Selection {
     Write-Host "===================================" -ForegroundColor Cyan
     Write-Host " Confirm Selection" -ForegroundColor Cyan
     Write-Host "===================================" -ForegroundColor Cyan
-    Write-Host "The following paths will be added to Quick Access:" -ForegroundColor Yellow
+    Write-Host "The following paths will be added to the PATH environment variable:" -ForegroundColor Yellow
     
     foreach ($path in $SelectedPaths) {
         Write-Host " - $($path.Name) " -NoNewline -ForegroundColor White
@@ -185,8 +202,8 @@ function Test-PathExists {
     }
 }
 
-# Function to add a path to Windows Quick Access
-function Add-ToQuickAccess {
+# Function to add a path to the environment PATH
+function Add-ToEnvPath {
     param (
         [string]$Path
     )
@@ -200,49 +217,34 @@ function Add-ToQuickAccess {
             }
         }
         
-        # Create a Shell application object to work with Quick Access
-        $shell = New-Object -ComObject Shell.Application
+        # Get current user PATH
+        $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
         
-        # Get the Quick Access folder (namespace 1 = Quick Access)
-        $quickAccess = $shell.Namespace(1)
-        
-        # Check if path is already in Quick Access by comparing titles
-        $pathName = Split-Path $Path -Leaf
-        $alreadyPinned = $false
-        
-        foreach ($item in $quickAccess.Items()) {
-            if ($item.Path -eq $Path) {
-                $alreadyPinned = $true
-                break
-            }
-        }
-        
-        if ($alreadyPinned) {
+        # Check if path is already in PATH
+        if ($currentPath -like "*$Path*" -or $currentPath -like "*$Path;*") {
             return @{
                 Success = $true
-                Message = "Path is already in Quick Access"
-                AlreadyPinned = $true
+                Message = "Path is already in PATH"
+                AlreadyAdded = $true
             }
         }
         
-        # Create a folder object for the path
-        $folder = $shell.Namespace(0).ParseName($Path)
+        # Add the path to PATH
+        [Environment]::SetEnvironmentVariable("PATH", "$currentPath;$Path", "User")
         
-        if ($null -eq $folder) {
+        # Verify it was added successfully
+        $newPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+        if ($newPath -like "*$Path*" -or $newPath -like "*$Path;*") {
+            return @{
+                Success = $true
+                Message = "Successfully added to PATH"
+                AlreadyAdded = $false
+            }
+        } else {
             return @{
                 Success = $false
-                Message = "Failed to get folder object for the path"
+                Message = "Failed to add to PATH"
             }
-        }
-        
-        # Pin the folder to Quick Access
-        # Verb 5386 is the code for Pin to Quick Access
-        $folder.InvokeVerb("PinToHome")
-        
-        return @{
-            Success = $true
-            Message = "Successfully added to Quick Access"
-            AlreadyPinned = $false
         }
     }
     catch {
@@ -257,26 +259,122 @@ function Add-ToQuickAccess {
 try {
     Clear-Host
     Write-Host "===================================" -ForegroundColor Cyan
-    Write-Host " Add to Windows Quick Access" -ForegroundColor Cyan
+    Write-Host " Add to Environment PATH" -ForegroundColor Cyan
     Write-Host "===================================" -ForegroundColor Cyan
     
-    # Get script directory
+    # Check if running as admin and elevate if needed
+    Invoke-ElevatedScript
+    
+    # Get script directory and determine if this is running from the Tools directory
     $scriptDir = Get-ScriptDirectory
-    $jsonPath = Join-Path -Path $scriptDir -ChildPath "add_quick_access_paths_config.json"
+    $toolsDir = "$env:USERPROFILE\Tools"
+    $toolsScriptDir = Join-Path -Path $toolsDir -ChildPath "EnvPathManager"
+    $isRunningFromTools = $scriptDir -eq $toolsScriptDir
+    
+    # Create the Tools directory if it doesn't exist
+    if (-not (Test-Path -Path $toolsScriptDir)) {
+        New-Item -ItemType Directory -Path $toolsScriptDir -Force | Out-Null
+        Write-Host "Created Tools directory: $toolsScriptDir" -ForegroundColor Green
+    }
+    
+    # If not running from the Tools directory, copy the script and config
+    if (-not $isRunningFromTools) {
+        Write-Host "Running from repository. Preparing to copy to Tools directory..." -ForegroundColor Yellow
+        
+        # Script path variables
+        $scriptPath = $MyInvocation.MyCommand.Path
+        $destScriptPath = Join-Path -Path $toolsScriptDir -ChildPath (Split-Path $scriptPath -Leaf)
+        
+        # Config path variables
+        $configPath = Join-Path -Path $scriptDir -ChildPath "add_to_env_path_config.json"
+        $destConfigPath = Join-Path -Path $toolsScriptDir -ChildPath "add_to_env_path_config.json"
+        
+        # Check if script already exists in destination and prompt for confirmation
+        $copyScript = $true
+        if (Test-Path $destScriptPath) {
+            $response = Read-Host "Script already exists in Tools directory. Overwrite? (Y/N)"
+            $copyScript = $response -in 'Y', 'y', 'Yes', 'yes'
+        }
+        
+        if ($copyScript) {
+            Copy-Item -Path $scriptPath -Destination $destScriptPath -Force
+            Write-Host "Copied script to $destScriptPath" -ForegroundColor Green
+        } else {
+            Write-Host "Using existing script in Tools directory" -ForegroundColor Cyan
+        }
+        
+        # Handle config file
+        if (Test-Path $configPath) {
+            $copyConfig = $true
+            if (Test-Path $destConfigPath) {
+                $response = Read-Host "Configuration file already exists in Tools directory. Overwrite? (Y/N)"
+                $copyConfig = $response -in 'Y', 'y', 'Yes', 'yes'
+            }
+            
+            if ($copyConfig) {
+                Copy-Item -Path $configPath -Destination $destConfigPath -Force
+                Write-Host "Copied configuration file to $destConfigPath" -ForegroundColor Green
+            } else {
+                Write-Host "Using existing configuration file in Tools directory" -ForegroundColor Cyan
+            }
+        } else {
+            # Create a sample config file if it doesn't exist at the destination
+            if (-not (Test-Path $destConfigPath)) {
+                $sampleConfig = @"
+[
+    {
+        "Name": "jq",
+        "Path": "C:\\Program Files\\jq"
+    },
+    {
+        "Name": "Sublime Text",
+        "Path": "C:\\Program Files\\Sublime Text"
+    },
+    {
+        "Name": "Baretail",
+        "Path": "C:\\Program Files\\Baretail"
+    },
+    {
+        "Name": "glogg",
+        "Path": "C:\\Program Files\\glogg"
+    },
+    {
+        "Name": "Go Binaries",
+        "Path": "C:\\Go\\bin"
+    },
+    {
+        "Name": "Custom Tools",
+        "Path": "C:\\Users\\Username\\Tools\\bin"
+    }
+]
+"@
+                $sampleConfig | Out-File -FilePath $destConfigPath -Encoding UTF8
+                Write-Host "Created sample configuration file at $destConfigPath" -ForegroundColor Green
+            }
+        }
+        
+        # Launch the copied script
+        Write-Host "Launching script from Tools directory..." -ForegroundColor Yellow
+        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$destScriptPath`""
+        exit
+    }
+    
+    # If we're here, we're running from the Tools directory
+    $jsonPath = Join-Path -Path $scriptDir -ChildPath "add_to_env_path_config.json"
     
     # Check if JSON file exists
     if (-not (Test-Path $jsonPath)) {
-        Write-Host "Error: add_quick_access_paths_config.json not found at '$jsonPath'" -ForegroundColor Red
-        Write-Host "Please create a add_quick_access_paths_config.json file with this format:" -ForegroundColor Yellow
+        Write-Host "Error: add_to_env_path_config.json not found at '$jsonPath'" -ForegroundColor Red
+        Write-Host "Please create a add_to_env_path_config.json file with this format:" -ForegroundColor Yellow
         Write-Host @"
 [
     {
-        "Name": "My Documents",
-        "Path": "C:\\Users\\Username\\Documents"
+        "Name": "Python Scripts",
+        "Path": "C:\\Users\\Username\\AppData\\Local\\Programs\\Python\\Python39\\Scripts"
     },
     {
-        "Name": "Project Folder",
-        "Path": "\\\\server\\share\\projects"
+        "Name": "Node.js",
+        "Path": "C:\\Program Files\\nodejs"
     }
 ]
 "@ -ForegroundColor Gray
@@ -318,7 +416,7 @@ try {
     }
     
     # Show multi-select menu to select paths
-    $selectedIndices = Show-MultiSelectMenu -Title "Select Paths to Add to Quick Access" -Options $validPaths -DisplayFunction ${function:Display-PathItem}
+    $selectedIndices = Show-MultiSelectMenu -Title "Select Paths to Add to PATH" -Options $validPaths -DisplayFunction ${function:Display-PathItem}
     $selectedPaths = $selectedIndices | ForEach-Object { $validPaths[$_] }
     
     if ($selectedPaths.Count -eq 0) {
@@ -338,7 +436,7 @@ try {
     
     # Process selected paths
     Write-Host "`n===================================" -ForegroundColor Cyan
-    Write-Host " Adding Paths to Quick Access" -ForegroundColor Cyan
+    Write-Host " Adding Paths to Environment PATH" -ForegroundColor Cyan
     Write-Host "===================================" -ForegroundColor Cyan
     
     $successCount = 0
@@ -348,14 +446,14 @@ try {
     
     foreach ($path in $selectedPaths) {
         Write-Host "`nProcessing: $($path.Name) ($($path.Path))" -ForegroundColor Yellow
-        $result = Add-ToQuickAccess -Path $path.Path
+        $result = Add-ToEnvPath -Path $path.Path
         
         if ($result.Success) {
-            if ($result.AlreadyPinned) {
-                Write-Host "Already in Quick Access" -ForegroundColor Cyan
+            if ($result.AlreadyAdded) {
+                Write-Host "Already in PATH" -ForegroundColor Cyan
                 $skippedCount++
             } else {
-                Write-Host "Successfully added to Quick Access" -ForegroundColor Green
+                Write-Host "Successfully added to PATH" -ForegroundColor Green
                 $successCount++
             }
         } else {
@@ -368,7 +466,7 @@ try {
             Path = $path.Path
             Success = $result.Success
             Message = $result.Message
-            AlreadyPinned = $result.AlreadyPinned
+            AlreadyAdded = $result.AlreadyAdded
         }
         
         $results += $pathResult
@@ -377,12 +475,12 @@ try {
     # Display summary
     Clear-Host
     Write-Host "===================================" -ForegroundColor Cyan
-    Write-Host " Quick Access Update Summary" -ForegroundColor Cyan
+    Write-Host " Environment PATH Update Summary" -ForegroundColor Cyan
     Write-Host "===================================" -ForegroundColor Cyan
     
     Write-Host "Total paths selected: $($selectedPaths.Count)" -ForegroundColor White
     Write-Host "Successfully added: $successCount" -ForegroundColor Green
-    Write-Host "Already in Quick Access: $skippedCount" -ForegroundColor Cyan
+    Write-Host "Already in PATH: $skippedCount" -ForegroundColor Cyan
     Write-Host "Failed: $failedCount" -ForegroundColor Red
     
     if ($failedCount -gt 0) {
@@ -395,26 +493,22 @@ try {
     
     if ($successCount -gt 0) {
         Write-Host "`nSuccessfully added paths:" -ForegroundColor Green
-        $results | Where-Object { $_.Success -and -not $_.AlreadyPinned } | ForEach-Object {
+        $results | Where-Object { $_.Success -and -not $_.AlreadyAdded } | ForEach-Object {
             Write-Host " - $($_.Name) " -NoNewline -ForegroundColor Green
             Write-Host "($($_.Path))" -ForegroundColor Gray
         }
     }
     
     if ($skippedCount -gt 0) {
-        Write-Host "`nAlready in Quick Access:" -ForegroundColor Cyan
-        $results | Where-Object { $_.AlreadyPinned } | ForEach-Object {
+        Write-Host "`nAlready in PATH:" -ForegroundColor Cyan
+        $results | Where-Object { $_.AlreadyAdded } | ForEach-Object {
             Write-Host " - $($_.Name) " -NoNewline -ForegroundColor Cyan
             Write-Host "($($_.Path))" -ForegroundColor Gray
         }
     }
     
-    # Clean up COM objects
-    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shell) | Out-Null
-    [System.GC]::Collect()
-    [System.GC]::WaitForPendingFinalizers()
-    
-    Write-Host "`nQuick Access update completed." -ForegroundColor Cyan
+    Write-Host "`nNote: You may need to restart your command prompt or PowerShell for" -ForegroundColor Yellow
+    Write-Host "PATH changes to take effect in the current session." -ForegroundColor Yellow
 }
 catch {
     Write-Host "`n===================================" -ForegroundColor Red
