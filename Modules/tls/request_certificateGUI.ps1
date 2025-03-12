@@ -405,7 +405,9 @@ function Update-Preview {
         $preview += "`n- $san"
     }
     
-    $preview += "`nKey Size: 4096 bits"
+    $preview += "`n`nKey Size: 4096 bits"
+    $preview += "`n`nKey Storage Provider: Microsoft Software Key Storage Provider"
+    $preview += "`n`nPrivate Key: Exportable"
     
     $sync.PreviewTextBlock.Text = $preview
 }
@@ -499,6 +501,11 @@ function Create-CSR {
     $ekuExtension = New-Object -ComObject X509Enrollment.CX509ExtensionEnhancedKeyUsage
     $ekuExtension.InitializeEncode($ekuOids)
     
+    # Create Key Usage extension for digital signature and key encipherment
+    $keyUsageExtension = New-Object -ComObject X509Enrollment.CX509ExtensionKeyUsage
+    # 0x20 = keyEncipherment, 0x80 = digitalSignature, combined = 0xA0
+    $keyUsageExtension.InitializeEncode(0xA0)
+    
     # Create the Distinguished Name with only non-empty fields
     $dn = New-Object -ComObject X509Enrollment.CX500DistinguishedName
     
@@ -530,13 +537,13 @@ function Create-CSR {
     $dnString = $dnParts -join ", "
     $dn.Encode($dnString, 0x0) # 0x0 represents XCN_CERT_NAME_STR_NONE
     
-    # Create a private key
+    # Create a private key using Microsoft Software Key Storage Provider
     $privateKey = New-Object -ComObject X509Enrollment.CX509PrivateKey
-    $privateKey.ProviderName = "Microsoft RSA SChannel Cryptographic Provider"
+    $privateKey.ProviderName = "Microsoft Software Key Storage Provider"
     $privateKey.KeySpec = 1 # XCN_AT_KEYEXCHANGE
     $privateKey.Length = 4096
     $privateKey.MachineContext = $true
-    $privateKey.ExportPolicy = 1 # XCN_NCRYPT_ALLOW_EXPORT_FLAG - Private key is exportable
+    $privateKey.ExportPolicy = 3 # 3 = Exportable and allows plaintext export
     $privateKey.Create()
     
     # Create certificate request object
@@ -551,6 +558,9 @@ function Create-CSR {
     # Add the Enhanced Key Usage extension
     $cert.X509Extensions.Add($ekuExtension)
     
+    # Add the Key Usage extension
+    $cert.X509Extensions.Add($keyUsageExtension)
+    
     # Create the enrollment request
     $enrollment = New-Object -ComObject X509Enrollment.CX509Enrollment
     $enrollment.InitializeFromRequest($cert)
@@ -564,7 +574,7 @@ function Create-CSR {
         
         try {
             # Try to submit the request and install the response immediately
-            $enrollment.InstallResponse(2, $csr, 1, $certificateTemplate) # 2 represents submit to CA directly
+            $enrollment.InstallResponse(2, $csr, 1, $UserInfo.CertificateTemplate) # 2 represents submit to CA directly
             
             Write-ActivityLog "Certificate successfully requested and installed in the Personal certificate store." -Type Success
             $sync.StatusBar.Text = "Certificate successfully installed"
@@ -575,6 +585,19 @@ function Create-CSR {
                 [System.Windows.MessageBoxButton]::OK,
                 [System.Windows.MessageBoxImage]::Information
             )
+            
+            # Log certificate details if immediately available
+            $certSubject = "CN=$($UserInfo.CommonName)"
+            $cert = Get-ChildItem -Path Cert:\LocalMachine\My | Where-Object { $_.Subject -eq $certSubject } | Select-Object -First 1
+            
+            if ($cert) {
+                Write-ActivityLog "Certificate Details:" -Type Information
+                Write-ActivityLog "  Subject: $($cert.Subject)" -Type Information
+                Write-ActivityLog "  Issuer:  $($cert.Issuer)" -Type Information
+                Write-ActivityLog "  Thumbprint: $($cert.Thumbprint)" -Type Information
+                Write-ActivityLog "  Valid from: $($cert.NotBefore) to $($cert.NotAfter)" -Type Information
+                Write-ActivityLog "  Request ID: $($cert.RequestId)" -Type Information
+            }
         }
         catch [System.Runtime.InteropServices.COMException] {
             # Check if this is a pending request error
@@ -600,18 +623,6 @@ function Create-CSR {
                 # Re-throw other errors
                 throw
             }
-        }
-        
-        # Optionally export the certificate info for reference
-        $certSubject = "CN=$($UserInfo.CommonName)"
-        $cert = Get-ChildItem -Path Cert:\LocalMachine\My | Where-Object { $_.Subject -eq $certSubject } | Select-Object -First 1
-        
-        if ($cert) {
-            Write-ActivityLog "Certificate Details:" -Type Information
-            Write-ActivityLog "  Subject: $($cert.Subject)" -Type Information
-            Write-ActivityLog "  Issuer:  $($cert.Issuer)" -Type Information
-            Write-ActivityLog "  Thumbprint: $($cert.Thumbprint)" -Type Information
-            Write-ActivityLog "  Valid from: $($cert.NotBefore) to $($cert.NotAfter)" -Type Information
         }
     }
     catch {
