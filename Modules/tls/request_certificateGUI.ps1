@@ -581,25 +581,12 @@ function Create-CSR {
         Write-ActivityLog "Submitting CSR to the Enterprise CA..." -Type Information
         
         try {
-            # Use the enrollment object to submit the request
-            # Context=0 means submit to CA; enrollment type=1 for X.509; server=Null for default CA
-            # Flags=0 means it will not install the response
-            $requestId = $enrollment.Submit(0, $csr, 0, "")
-            
-            Write-ActivityLog "Certificate request submitted. Request ID from CA: $requestId" -Type Success
-            
-            # Save the request ID to a file for tracking
-            $requestIdFilePath = "$env:TEMP\CSR_$([guid]::NewGuid().ToString()).id"
-            "CA Request ID: $requestId" | Out-File -FilePath $requestIdFilePath -Encoding ascii
-            Write-ActivityLog "Request ID saved to: $requestIdFilePath" -Type Information
-            
-            # The enrollment is now properly registered in the Certificate Enrollment Request store
-            # This ensures auto-enrollment can find and match the certificate when approved
-            
-            $sync.StatusBar.Text = "Certificate request submitted"
+            Write-ActivityLog "Submitting CSR to the Enterprise CA..." -Type Information
+            $enrollment.Enroll()  # This submits the request and registers it as pending
+            Write-ActivityLog "Certificate request submitted. It is now pending approval." -Type Success
             
             [System.Windows.MessageBox]::Show(
-                "Certificate request has been submitted to the CA and is awaiting approval.`n`nThe CSR has been saved to: $requestFilePath`n`nRequest ID: $requestId`n`nThe request is registered in the Certificate Enrollment system and will be automatically installed when approved if auto-enrollment is enabled.",
+                "Certificate request has been submitted to the CA and is awaiting approval.`n`nThe CSR has been saved to: $requestFilePath`n`nThe request is registered in the Certificate Enrollment system and will be automatically installed when approved if auto-enrollment is enabled.",
                 "Request Submitted",
                 [System.Windows.MessageBoxButton]::OK,
                 [System.Windows.MessageBoxImage]::Information
@@ -607,8 +594,6 @@ function Create-CSR {
         }
         catch {
             Write-ActivityLog "Error submitting CSR to the CA: $_" -Type Error
-            $sync.StatusBar.Text = "Error submitting CSR"
-            
             [System.Windows.MessageBox]::Show(
                 "Error submitting CSR to the CA: $_`n`nThe CSR has been saved to: $requestFilePath and can be submitted manually.",
                 "Error",
@@ -616,6 +601,7 @@ function Create-CSR {
                 [System.Windows.MessageBoxImage]::Error
             )
         }
+        
     }
     catch {
         Write-ActivityLog "Error creating CSR: $_" -Type Error
