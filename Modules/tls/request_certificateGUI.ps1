@@ -569,68 +569,60 @@ function Create-CSR {
         # Create the request
         $csr = $enrollment.CreateRequest(0x1) # 0x1 represents base64 encoding
         
-        # Submit the request directly to the enterprise CA
+        # Generate a unique ID for the request
+        $requestId = [guid]::NewGuid().ToString()
+        $requestFilePath = "$env:TEMP\CSR_$requestId.req"
+        
+        # Save the CSR to a file
+        $csr | Out-File -FilePath $requestFilePath -Encoding ascii
+        Write-ActivityLog "CSR saved to: $requestFilePath" -Type Information
+        
+        # Submit the request to the enterprise CA without waiting for immediate installation
         Write-ActivityLog "Submitting CSR to the Enterprise CA..." -Type Information
         
         try {
-            # Try to submit the request and install the response immediately
-            $enrollment.InstallResponse(2, $csr, 1, $UserInfo.CertificateTemplate) # 2 represents submit to CA directly
+            # Use the enrollment object to submit the request
+            # Context=0 means submit to CA; enrollment type=1 for X.509; server=Null for default CA
+            # Flags=0 means it will not install the response
+            $requestId = $enrollment.Submit(0, $csr, 0, "")
             
-            Write-ActivityLog "Certificate successfully requested and installed in the Personal certificate store." -Type Success
-            $sync.StatusBar.Text = "Certificate successfully installed"
+            Write-ActivityLog "Certificate request submitted. Request ID from CA: $requestId" -Type Success
+            
+            # Save the request ID to a file for tracking
+            $requestIdFilePath = "$env:TEMP\CSR_$([guid]::NewGuid().ToString()).id"
+            "CA Request ID: $requestId" | Out-File -FilePath $requestIdFilePath -Encoding ascii
+            Write-ActivityLog "Request ID saved to: $requestIdFilePath" -Type Information
+            
+            # The enrollment is now properly registered in the Certificate Enrollment Request store
+            # This ensures auto-enrollment can find and match the certificate when approved
+            
+            $sync.StatusBar.Text = "Certificate request submitted"
             
             [System.Windows.MessageBox]::Show(
-                "Certificate successfully requested and installed in the Personal certificate store.",
-                "Success",
+                "Certificate request has been submitted to the CA and is awaiting approval.`n`nThe CSR has been saved to: $requestFilePath`n`nRequest ID: $requestId`n`nThe request is registered in the Certificate Enrollment system and will be automatically installed when approved if auto-enrollment is enabled.",
+                "Request Submitted",
                 [System.Windows.MessageBoxButton]::OK,
                 [System.Windows.MessageBoxImage]::Information
             )
-            
-            # Log certificate details if immediately available
-            $certSubject = "CN=$($UserInfo.CommonName)"
-            $cert = Get-ChildItem -Path Cert:\LocalMachine\My | Where-Object { $_.Subject -eq $certSubject } | Select-Object -First 1
-            
-            if ($cert) {
-                Write-ActivityLog "Certificate Details:" -Type Information
-                Write-ActivityLog "  Subject: $($cert.Subject)" -Type Information
-                Write-ActivityLog "  Issuer:  $($cert.Issuer)" -Type Information
-                Write-ActivityLog "  Thumbprint: $($cert.Thumbprint)" -Type Information
-                Write-ActivityLog "  Valid from: $($cert.NotBefore) to $($cert.NotAfter)" -Type Information
-                Write-ActivityLog "  Request ID: $($cert.RequestId)" -Type Information
-            }
         }
-        catch [System.Runtime.InteropServices.COMException] {
-            # Check if this is a pending request error
-            if ($_.Exception.HResult -eq 0x80094012 -or $_.Exception.Message -match "pending") {
-                Write-ActivityLog "Certificate request has been submitted but is pending approval." -Type Warning
-                
-                # Save the request as a file for later reference
-                $requestId = [guid]::NewGuid().ToString()
-                $requestFilePath = "$env:TEMP\CSR_$requestId.req"
-                $csr | Out-File -FilePath $requestFilePath -Encoding ascii
-                
-                Write-ActivityLog "CSR saved to: $requestFilePath" -Type Information
-                $sync.StatusBar.Text = "Certificate request pending approval"
-                
-                [System.Windows.MessageBox]::Show(
-                    "Certificate request has been submitted but is pending approval.`n`nThe request has been queued for processing by the CA administrator.`n`nThe CSR has been saved to: $requestFilePath",
-                    "Request Pending",
-                    [System.Windows.MessageBoxButton]::OK,
-                    [System.Windows.MessageBoxImage]::Warning
-                )
-            }
-            else {
-                # Re-throw other errors
-                throw
-            }
+        catch {
+            Write-ActivityLog "Error submitting CSR to the CA: $_" -Type Error
+            $sync.StatusBar.Text = "Error submitting CSR"
+            
+            [System.Windows.MessageBox]::Show(
+                "Error submitting CSR to the CA: $_`n`nThe CSR has been saved to: $requestFilePath and can be submitted manually.",
+                "Error",
+                [System.Windows.MessageBoxButton]::OK,
+                [System.Windows.MessageBoxImage]::Error
+            )
         }
     }
     catch {
-        Write-ActivityLog "Error submitting CSR to the CA: $_" -Type Error
+        Write-ActivityLog "Error creating CSR: $_" -Type Error
         $sync.StatusBar.Text = "Error creating CSR"
         
         [System.Windows.MessageBox]::Show(
-            "Error submitting CSR to the CA: $_",
+            "Error creating CSR: $_",
             "Error",
             [System.Windows.MessageBoxButton]::OK,
             [System.Windows.MessageBoxImage]::Error
