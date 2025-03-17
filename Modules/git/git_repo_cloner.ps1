@@ -85,13 +85,13 @@ function Install-GithubCLI {
     
     $installChoice = Read-Host @"
 How would you like to install GitHub CLI?
-1. Use Chocolatey (if installed)
-2. Use local/network MSI installer
+1. Use local/network MSI installer
+2. Use Chocolatey (if installed)
 Enter choice (1 or 2)
 "@
 
     switch ($installChoice) {
-        "1" {
+        "2" {
             # Check if chocolatey is installed
             if (Test-CommandExists "choco") {
                 Write-ColorMessage "Installing GitHub CLI via Chocolatey..." -Level Info
@@ -120,7 +120,7 @@ Enter choice (1 or 2)
             }
         }
         
-        "2" {
+        "1" {
             # Default MSI path - adjust this to your organization's standard location
             $defaultMsiPath = "C:\Installers\gh_2.67.0_windows_amd64.msi"
             
@@ -300,6 +300,11 @@ try {
         exit 0
     }
     
+    # Fix: Ensure $selectedRepos is always treated as an array
+    if ($selectedRepos -isnot [System.Array]) {
+        $selectedRepos = @($selectedRepos)
+    }
+    
     # Clone selected repositories
     Write-ColorMessage "Cloning $($selectedRepos.Count) selected repositories..." -Level Info
     
@@ -321,8 +326,7 @@ try {
         Write-ColorMessage "Cloning $repoName to $localRepoPath..." -Level Info
         
         try {
-            # Clone directly to the specified location using the --clone-dir parameter
-            # Format: gh repo clone ORG/REPO DESTINATION
+            # Clone directly to the specified location
             gh repo clone "$repoName" "$localRepoPath"
             
             if ($LASTEXITCODE -eq 0) {
