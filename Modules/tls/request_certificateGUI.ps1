@@ -1,48 +1,44 @@
-# CSR Request - GUI Tool
+# CSR Request - GUI Tool with certreq
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
 
-# Check if the script is running with administrator privileges
+# Define script variables
+$CA_Server = "-"  # Use "-" for default behavior or set to "YourCAServer\CAName"
+$CertificateStoragePath = "C:\temp\tls\csr_gui\"
+
+# System information variables
+$hostname = ([System.Net.Dns]::GetHostEntry($env:computerName)).HostName
+$shortHostname = $env:COMPUTERNAME
+$defaultEmail = "user@domain.com"
+
 function Test-Administrator {
     $currentUser = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     return $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Self-elevate the script if required
 if (-not (Test-Administrator)) {
     Write-Host "Requesting administrative privileges..." -ForegroundColor Yellow
-    
     $scriptPath = $MyInvocation.MyCommand.Definition
-    
-    # Build arguments to pass to the elevated process
-    $argString = ""
+    $argString = "-ExecutionPolicy Bypass -File `"$scriptPath`""
     if ($MyInvocation.BoundParameters.Count -gt 0) {
-        $argString = "-ExecutionPolicy Bypass -File `"$scriptPath`""
         foreach ($key in $MyInvocation.BoundParameters.Keys) {
             $value = $MyInvocation.BoundParameters[$key]
             if ($value -is [System.String]) {
                 $argString += " -$key `"$value`""
-            } else {
+            }
+            else {
                 $argString += " -$key $value"
             }
         }
-    } else {
-        $argString = "-ExecutionPolicy Bypass -File `"$scriptPath`""
     }
-    
-    # Start PowerShell as administrator with this script
-    Start-Process -FilePath PowerShell.exe -ArgumentList $argString -Verb RunAs
-    
-    # Exit the non-elevated script
+    Start-Process -FilePath PowerShell.exe -ArgumentList "-NoProfile $argString" -Verb RunAs
     exit
 }
 
-# Create a synchronized hashtable for sharing data
 $sync = [hashtable]::Synchronized(@{})
 
-# Available certificate templates (customize this list as needed)
 $availableTemplates = @(
     @{Name = "WebServer"; Description = "Web Server Certificate"},
     @{Name = "Workstation"; Description = "Workstation Authentication Certificate"},
@@ -52,36 +48,22 @@ $availableTemplates = @(
     @{Name = "ClientAuth"; Description = "Client Authentication Certificate"}
 )
 
-# Default template will be set later based on UI selection
-
-# Get hostname information for default values
-$hostname = [System.Net.Dns]::GetHostByName(($env:computerName)).HostName
-$shortHostname = $env:COMPUTERNAME
-$defaultEmail = "user@domain.com" # Replace with your default domain
-
-# Create log function for centralized logging
 function Write-ActivityLog {
     param (
         [Parameter(Mandatory=$true)]
         [string]$Message,
-        
         [Parameter(Mandatory=$false)]
         [ValidateSet("Information", "Warning", "Error", "Success")]
         [string]$Type = "Information"
     )
-    
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $logMessage = "[$timestamp] [$Type] $Message"
-    
-    # Add to the log text box if UI is loaded
     if ($sync.LogTextBox -ne $null) {
         $sync.LogTextBox.Dispatcher.Invoke([action]{
             $sync.LogTextBox.AppendText("$logMessage`r`n")
             $sync.LogTextBox.ScrollToEnd()
         })
     }
-    
-    # Also write to console for debugging purposes
     switch ($Type) {
         "Information" { Write-Host $logMessage -ForegroundColor Gray }
         "Warning" { Write-Host $logMessage -ForegroundColor Yellow }
@@ -90,13 +72,12 @@ function Write-ActivityLog {
     }
 }
 
-# Define the XAML UI
 [xml]$xaml = @"
 <Window 
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="CSR Request Tool" 
-    Height="680" 
+    Height="720" 
     Width="700"
     WindowStartupLocation="CenterScreen">
     <Window.Resources>
@@ -148,6 +129,12 @@ function Write-ActivityLog {
             <Setter Property="Margin" Value="0,5,0,2"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
+        
+        <Style TargetType="TabItem">
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Background" Value="#F0F0F0"/>
+        </Style>
     </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
@@ -157,120 +144,218 @@ function Write-ActivityLog {
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         
-        <!-- Header -->
         <Border Grid.Row="0" Background="#2d2d30" Padding="15">
             <Grid>
                 <StackPanel>
                     <TextBlock Text="CSR Request Tool" FontSize="22" Foreground="White" FontWeight="Bold"/>
-                    <TextBlock Text="Generate and submit Certificate Signing Requests" Foreground="#999999" Margin="0,5,0,0"/>
+                    <TextBlock Text="Generate and submit Certificate Signing Requests using certreq" 
+                               Foreground="#999999" Margin="0,5,0,0"/>
                 </StackPanel>
             </Grid>
         </Border>
         
-        <!-- Main Content -->
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="15">
-            <StackPanel>
-                <!-- Certificate Information -->
-                <GroupBox Header="Certificate Information" Padding="10" Margin="0,0,0,15">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="120"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
+        <TabControl Grid.Row="1" x:Name="MainTabControl" Margin="15">
+            <TabItem Header="Create CSR">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <GroupBox Header="Certificate Information" Padding="10" Margin="0,0,0,15">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                
+                                <Label Grid.Row="0" Grid.Column="0" Content="Common Name:"/>
+                                <TextBox Grid.Row="0" Grid.Column="1" x:Name="CommonNameTextBox" 
+                                         ToolTip="The fully qualified domain name for the certificate"/>
+                                
+                                <Label Grid.Row="1" Grid.Column="0" Content="Friendly Name:"/>
+                                <TextBox Grid.Row="1" Grid.Column="1" x:Name="FriendlyNameTextBox" 
+                                         ToolTip="A descriptive name for this certificate"/>
+                                
+                                <Label Grid.Row="2" Grid.Column="0" Content="Certificate Template:"/>
+                                <ComboBox Grid.Row="2" Grid.Column="1" x:Name="TemplateComboBox" 
+                                          ToolTip="Select the certificate template to use"/>
+                                
+                                <Label Grid.Row="3" Grid.Column="0" Content="Certificate Usage:"/>
+                                <ComboBox Grid.Row="3" Grid.Column="1" x:Name="CertUsageComboBox">
+                                    <ComboBoxItem Content="Client Authentication" Tag="clientAuth"/>
+                                    <ComboBoxItem Content="Server Authentication" Tag="serverAuth"/>
+                                    <ComboBoxItem Content="Both Client and Server" Tag="both" IsSelected="True"/>
+                                </ComboBox>
+                                
+                                <Label Grid.Row="4" Grid.Column="0" Content="Additional SANs:"/>
+                                <TextBox Grid.Row="4" Grid.Column="1" x:Name="AdditionalSANsTextBox" 
+                                         ToolTip="Comma-separated list of additional Subject Alternative Names"/>
+                            </Grid>
+                        </GroupBox>
                         
-                        <Label Grid.Row="0" Grid.Column="0" Content="Common Name:"/>
-                        <TextBox Grid.Row="0" Grid.Column="1" x:Name="CommonNameTextBox" ToolTip="The fully qualified domain name for the certificate"/>
+                        <GroupBox Header="Organization Information" Padding="10" Margin="0,0,0,15">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                
+                                <Label Grid.Row="0" Grid.Column="0" Content="Email Address:"/>
+                                <TextBox Grid.Row="0" Grid.Column="1" x:Name="EmailTextBox" 
+                                         ToolTip="Your email address"/>
+                                
+                                <Label Grid.Row="1" Grid.Column="0" Content="Organization:"/>
+                                <TextBox Grid.Row="1" Grid.Column="1" x:Name="OrganizationTextBox" 
+                                         ToolTip="Your organization name"/>
+                                
+                                <Label Grid.Row="2" Grid.Column="0" Content="Org. Unit:"/>
+                                <TextBox Grid.Row="2" Grid.Column="1" x:Name="OrgUnitTextBox" 
+                                         ToolTip="Your organizational unit or department"/>
+                                
+                                <Label Grid.Row="3" Grid.Column="0" Content="City/Locality:"/>
+                                <TextBox Grid.Row="3" Grid.Column="1" x:Name="CityTextBox" 
+                                         ToolTip="Your city or locality"/>
+                                
+                                <Label Grid.Row="4" Grid.Column="0" Content="State/Province:"/>
+                                <TextBox Grid.Row="4" Grid.Column="1" x:Name="StateTextBox" 
+                                         ToolTip="Your state or province"/>
+                                
+                                <Label Grid.Row="5" Grid.Column="0" Content="Country:"/>
+                                <TextBox Grid.Row="5" Grid.Column="1" x:Name="CountryTextBox" 
+                                         ToolTip="Two-letter country code (e.g. US, UK, CA)"/>
+                            </Grid>
+                        </GroupBox>
                         
-                        <Label Grid.Row="1" Grid.Column="0" Content="Friendly Name:"/>
-                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="FriendlyNameTextBox" ToolTip="A descriptive name for this certificate"/>
+                        <GroupBox Header="Preview" Padding="10" Margin="0,0,0,15">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                
+                                <TextBlock Grid.Row="0" Text="The following information will be used to create your certificate:" Margin="0,0,0,5"/>
+                                <Border Grid.Row="1" BorderBrush="#CCCCCC" BorderThickness="1" CornerRadius="3" Background="#F8F8F8">
+                                    <TextBlock x:Name="PreviewTextBlock" FontFamily="Consolas" Padding="10" TextWrapping="Wrap"/>
+                                </Border>
+                            </Grid>
+                        </GroupBox>
                         
-                        <Label Grid.Row="2" Grid.Column="0" Content="Certificate Template:"/>
-                        <ComboBox Grid.Row="2" Grid.Column="1" x:Name="TemplateComboBox" ToolTip="Select the certificate template to use">
-                            <!-- Templates will be added programmatically -->
-                        </ComboBox>
-                        
-                        <Label Grid.Row="3" Grid.Column="0" Content="Certificate Usage:"/>
-                        <ComboBox Grid.Row="3" Grid.Column="1" x:Name="CertUsageComboBox">
-                            <ComboBoxItem Content="Client Authentication" Tag="clientAuth"/>
-                            <ComboBoxItem Content="Server Authentication" Tag="serverAuth"/>
-                            <ComboBoxItem Content="Both Client and Server" Tag="both" IsSelected="True"/>
-                        </ComboBox>
-                        
-                        <Label Grid.Row="4" Grid.Column="0" Content="Additional SANs:"/>
-                        <TextBox Grid.Row="4" Grid.Column="1" x:Name="AdditionalSANsTextBox" 
-                                 ToolTip="Comma-separated list of additional Subject Alternative Names"/>
-                    </Grid>
-                </GroupBox>
-                
-                <!-- Organization Information -->
-                <GroupBox Header="Organization Information" Padding="10" Margin="0,0,0,15">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="120"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-                        
-                        <Label Grid.Row="0" Grid.Column="0" Content="Email Address:"/>
-                        <TextBox Grid.Row="0" Grid.Column="1" x:Name="EmailTextBox" ToolTip="Your email address"/>
-                        
-                        <Label Grid.Row="1" Grid.Column="0" Content="Organization:"/>
-                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="OrganizationTextBox" ToolTip="Your organization name"/>
-                        
-                        <Label Grid.Row="2" Grid.Column="0" Content="Org. Unit:"/>
-                        <TextBox Grid.Row="2" Grid.Column="1" x:Name="OrgUnitTextBox" ToolTip="Your organizational unit or department"/>
-                        
-                        <Label Grid.Row="3" Grid.Column="0" Content="City/Locality:"/>
-                        <TextBox Grid.Row="3" Grid.Column="1" x:Name="CityTextBox" ToolTip="Your city or locality"/>
-                        
-                        <Label Grid.Row="4" Grid.Column="0" Content="State/Province:"/>
-                        <TextBox Grid.Row="4" Grid.Column="1" x:Name="StateTextBox" ToolTip="Your state or province"/>
-                        
-                        <Label Grid.Row="5" Grid.Column="0" Content="Country:"/>
-                        <TextBox Grid.Row="5" Grid.Column="1" x:Name="CountryTextBox" ToolTip="Two-letter country code (e.g. US, UK, CA)"/>
-                    </Grid>
-                </GroupBox>
-                
-                <!-- Preview -->
-                <GroupBox Header="Preview" Padding="10" Margin="0,0,0,15">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-                        
-                        <TextBlock Grid.Row="0" Text="The following information will be used to create your certificate:" Margin="0,0,0,5"/>
-                        <Border Grid.Row="1" BorderBrush="#CCCCCC" BorderThickness="1" CornerRadius="3" Background="#F8F8F8">
-                            <TextBlock x:Name="PreviewTextBlock" FontFamily="Consolas" Padding="10" TextWrapping="Wrap"/>
-                        </Border>
-                    </Grid>
-                </GroupBox>
-                
-                <!-- Actions -->
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10,0,10">
-                    <Button x:Name="RefreshPreviewButton" Content="Refresh Preview" 
-                            Style="{StaticResource DefaultButton}" Width="150"/>
-                    <Button x:Name="CreateCSRButton" Content="Create and Submit CSR" 
-                            Style="{StaticResource DefaultButton}" Width="200" Margin="15,5,5,5"/>
-                </StackPanel>
-            </StackPanel>
-        </ScrollViewer>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10,0,10">
+                            <Button x:Name="RefreshPreviewButton" Content="Refresh Preview" 
+                                    Style="{StaticResource DefaultButton}" Width="150"/>
+                            <Button x:Name="CreateCSRButton" Content="Create CSR" 
+                                    Style="{StaticResource DefaultButton}" Width="150" Margin="15,5,5,5"/>
+                            <Button x:Name="SubmitCSRButton" Content="Submit CSR" 
+                                    Style="{StaticResource DefaultButton}" Width="150" Margin="5,5,5,5"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            
+            <TabItem Header="Retrieve Certificate">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    
+                    <TextBlock Grid.Row="0" 
+                               Text="Retrieve and install your signed certificate" 
+                               FontSize="16" 
+                               FontWeight="Bold"
+                               Margin="0,0,0,15"/>
+                    
+                    <GroupBox Grid.Row="1" Header="Certificate Request Details" Padding="10" Margin="0,0,0,15">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="120"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            
+                            <Label Grid.Row="0" Grid.Column="0" Content="Request ID:"/>
+                            <TextBox Grid.Row="0" Grid.Column="1" x:Name="RequestIdTextBox" 
+                                     ToolTip="Enter the Request ID from your certificate request"/>
+                            <Button Grid.Row="0" Grid.Column="2" x:Name="CheckStatusButton" 
+                                    Content="Check Status" Style="{StaticResource DefaultButton}" 
+                                    Width="110" Margin="10,3,0,10"/>
+                            
+                            <Label Grid.Row="1" Grid.Column="0" Content="Certificate File:"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" x:Name="CertFileTextBox" 
+                                     ToolTip="Path to a certificate file (.cer, .crt, .p7b)"/>
+                            <Button Grid.Row="1" Grid.Column="2" x:Name="BrowseCertButton" 
+                                    Content="Browse" Style="{StaticResource DefaultButton}" 
+                                    Width="110" Margin="10,3,0,10"/>
+                        </Grid>
+                    </GroupBox>
+                    
+                    <GroupBox Grid.Row="2" Header="Certificate Status" Padding="10" Margin="0,0,0,15">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="120"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            
+                            <Label Grid.Row="0" Grid.Column="0" Content="Status:"/>
+                            <TextBlock Grid.Row="0" Grid.Column="1" x:Name="CertStatusTextBlock" 
+                                       Text="Not checked yet" Margin="5"/>
+                            
+                            <Label Grid.Row="1" Grid.Column="0" Content="Disposition:"/>
+                            <TextBlock Grid.Row="1" Grid.Column="1" x:Name="DispositionTextBlock" 
+                                       Text="-" Margin="5"/>
+                            
+                            <Label Grid.Row="2" Grid.Column="0" Content="Last Checked:"/>
+                            <TextBlock Grid.Row="2" Grid.Column="1" x:Name="LastCheckedTextBlock" 
+                                       Text="-" Margin="5"/>
+                        </Grid>
+                    </GroupBox>
+                    
+                    <GroupBox Grid.Row="3" Header="Certificate Actions" Padding="10" Margin="0,0,0,15">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Button x:Name="RetrieveButton" Content="Retrieve Certificate" 
+                                    Style="{StaticResource DefaultButton}" Width="160" Margin="5,5,15,5"/>
+                            <Button x:Name="InstallButton" Content="Install Certificate" 
+                                    Style="{StaticResource DefaultButton}" Width="160" Margin="5"/>
+                            <Button x:Name="ExportButton" Content="Export with Private Key" 
+                                    Style="{StaticResource DefaultButton}" Width="160" Margin="15,5,5,5"/>
+                        </StackPanel>
+                    </GroupBox>
+                    
+                    <GroupBox Grid.Row="4" Header="Certificate Details" Padding="10" Margin="0,0,0,15">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <TextBlock x:Name="CertDetailsTextBlock" FontFamily="Consolas" 
+                                       TextWrapping="Wrap" Padding="5"/>
+                        </ScrollViewer>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+        </TabControl>
         
-        <!-- Log Panel -->
         <Grid Grid.Row="2" Margin="15,0,15,0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -286,7 +371,6 @@ function Write-ActivityLog {
             </Border>
         </Grid>
         
-        <!-- Status Bar -->
         <Border Grid.Row="3" Background="#E0E0E0" Padding="10,8" Margin="0,15,0,0">
             <TextBlock x:Name="StatusBar" Text="Ready" FontSize="12"/>
         </Border>
@@ -294,7 +378,6 @@ function Write-ActivityLog {
 </Window>
 "@
 
-# Create a form object from the XAML
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 try {
     $window = [Windows.Markup.XamlReader]::Load($reader)
@@ -304,7 +387,6 @@ catch {
     exit
 }
 
-# Store references in the sync hashtable
 $sync.Window = $window
 $sync.CommonNameTextBox = $window.FindName("CommonNameTextBox")
 $sync.FriendlyNameTextBox = $window.FindName("FriendlyNameTextBox")
@@ -320,99 +402,93 @@ $sync.CountryTextBox = $window.FindName("CountryTextBox")
 $sync.PreviewTextBlock = $window.FindName("PreviewTextBlock")
 $sync.RefreshPreviewButton = $window.FindName("RefreshPreviewButton")
 $sync.CreateCSRButton = $window.FindName("CreateCSRButton")
+$sync.SubmitCSRButton = $window.FindName("SubmitCSRButton")
 $sync.StatusBar = $window.FindName("StatusBar")
 $sync.LogTextBox = $window.FindName("LogTextBox")
+$sync.MainTabControl = $window.FindName("MainTabControl")
 
-# Set default values
+$sync.RequestIdTextBox = $window.FindName("RequestIdTextBox")
+$sync.CertFileTextBox = $window.FindName("CertFileTextBox")
+$sync.CheckStatusButton = $window.FindName("CheckStatusButton")
+$sync.BrowseCertButton = $window.FindName("BrowseCertButton")
+$sync.CertStatusTextBlock = $window.FindName("CertStatusTextBlock")
+$sync.DispositionTextBlock = $window.FindName("DispositionTextBlock")
+$sync.LastCheckedTextBlock = $window.FindName("LastCheckedTextBlock")
+$sync.RetrieveButton = $window.FindName("RetrieveButton")
+$sync.InstallButton = $window.FindName("InstallButton")
+$sync.ExportButton = $window.FindName("ExportButton")
+$sync.CertDetailsTextBlock = $window.FindName("CertDetailsTextBlock")
+
 $sync.CommonNameTextBox.Text = $hostname
 $sync.FriendlyNameTextBox.Text = "$shortHostname Certificate"
 $sync.EmailTextBox.Text = $defaultEmail
 $sync.CountryTextBox.Text = "US"
 
-# Populate certificate templates dropdown
+$sync.SubmitCSRButton.IsEnabled = $false
+
 foreach ($template in $availableTemplates) {
     $item = New-Object System.Windows.Controls.ComboBoxItem
     $item.Content = $template.Description
     $item.Tag = $template.Name
     $sync.TemplateComboBox.Items.Add($item)
 }
-
-# Select the first template by default
 if ($sync.TemplateComboBox.Items.Count -gt 0) {
     $sync.TemplateComboBox.SelectedIndex = 0
 }
 
-# Function to generate a preview of the certificate details
 function Update-Preview {
     $commonName = $sync.CommonNameTextBox.Text
     if ([string]::IsNullOrWhiteSpace($commonName)) { $commonName = $hostname }
     
-    $selectedItem = $sync.CertUsageComboBox.SelectedItem
-    $certUsage = $selectedItem.Tag
+    $selectedUsageItem = $sync.CertUsageComboBox.SelectedItem
+    $certUsage = $selectedUsageItem.Tag
     
     $selectedTemplateItem = $sync.TemplateComboBox.SelectedItem
     $templateName = $selectedTemplateItem.Tag
     $templateDescription = $selectedTemplateItem.Content
     
     $sanList = @($commonName, $hostname, $shortHostname)
-    
-    # Add additional SANs if provided
     if (-not [string]::IsNullOrWhiteSpace($sync.AdditionalSANsTextBox.Text)) {
         $additionalSANArray = $sync.AdditionalSANsTextBox.Text -split ',' | ForEach-Object { $_.Trim() }
         $sanList += $additionalSANArray
     }
-    
-    # Remove duplicates from SAN list
     $sanList = $sanList | Select-Object -Unique
     
     $preview = "Subject: CN=$commonName"
-    
     if (-not [string]::IsNullOrWhiteSpace($sync.OrganizationTextBox.Text)) {
         $preview += ", O=$($sync.OrganizationTextBox.Text)"
     }
-    
     if (-not [string]::IsNullOrWhiteSpace($sync.OrgUnitTextBox.Text)) {
         $preview += ", OU=$($sync.OrgUnitTextBox.Text)"
     }
-    
     if (-not [string]::IsNullOrWhiteSpace($sync.CityTextBox.Text)) {
         $preview += ", L=$($sync.CityTextBox.Text)"
     }
-    
     if (-not [string]::IsNullOrWhiteSpace($sync.StateTextBox.Text)) {
         $preview += ", S=$($sync.StateTextBox.Text)"
     }
-    
     $preview += ", C=$($sync.CountryTextBox.Text)"
-    
     if (-not [string]::IsNullOrWhiteSpace($sync.EmailTextBox.Text)) {
         $preview += ", E=$($sync.EmailTextBox.Text)"
     }
-    
     $preview += "`n`nFriendly Name: $($sync.FriendlyNameTextBox.Text)"
     $preview += "`n`nCertificate Usage: "
-    
     switch($certUsage) {
         "clientAuth" { $preview += "Client Authentication" }
         "serverAuth" { $preview += "Server Authentication" }
         "both" { $preview += "Both Client and Server Authentication" }
     }
-    
     $preview += "`n`nTemplate: $templateDescription ($templateName)"
-    
     $preview += "`n`nSubject Alternative Names (SANs):"
     foreach ($san in $sanList) {
         $preview += "`n- $san"
     }
-    
     $preview += "`n`nKey Size: 4096 bits"
     $preview += "`n`nKey Storage Provider: Microsoft Software Key Storage Provider"
     $preview += "`n`nPrivate Key: Exportable"
-    
     $sync.PreviewTextBlock.Text = $preview
 }
 
-# Function to collect user input from the form
 function Get-FormInput {
     $commonName = $sync.CommonNameTextBox.Text
     if ([string]::IsNullOrWhiteSpace($commonName)) { $commonName = $hostname }
@@ -420,8 +496,8 @@ function Get-FormInput {
     $friendlyName = $sync.FriendlyNameTextBox.Text
     if ([string]::IsNullOrWhiteSpace($friendlyName)) { $friendlyName = "$shortHostname Certificate" }
     
-    $selectedItem = $sync.CertUsageComboBox.SelectedItem
-    $certUsage = $selectedItem.Tag
+    $selectedUsageItem = $sync.CertUsageComboBox.SelectedItem
+    $certUsage = $selectedUsageItem.Tag
     
     $selectedTemplateItem = $sync.TemplateComboBox.SelectedItem
     $templateName = $selectedTemplateItem.Tag
@@ -429,7 +505,6 @@ function Get-FormInput {
     $country = $sync.CountryTextBox.Text
     if ([string]::IsNullOrWhiteSpace($country)) { $country = "US" }
     
-    # Return all collected information as a hashtable
     return @{
         CommonName = $commonName
         FriendlyName = $friendlyName
@@ -445,235 +520,193 @@ function Get-FormInput {
     }
 }
 
-# Function to create and submit the CSR
-function Create-CSR {
+function Create-CSRConfigFile {
     param (
         [hashtable]$UserInfo
     )
+    Write-ActivityLog "Creating CSR configuration file..." -Type Information
+    $requestId = [Guid]::NewGuid().ToString()
+    $sync.CurrentRequestId = $requestId
     
-    Write-ActivityLog "Creating Certificate Signing Request..." -Type Information
+    # Ensure certificate storage directory exists
+    if (-not (Test-Path $CertificateStoragePath)) {
+        New-Item -Path $CertificateStoragePath -ItemType Directory | Out-Null
+    }
     
-    # Prepare the SAN extension
+    $configFile = "$CertificateStoragePath\CSR_Config_$requestId.inf"
+    $csrFile = "$CertificateStoragePath\CSR_$requestId.req"
+    $sync.CurrentConfigFile = $configFile
+    $sync.CurrentCSRFile = $csrFile
+    
     $sanList = @($UserInfo.CommonName, $hostname, $shortHostname)
-    
-    # Add additional SANs if provided
     if (-not [string]::IsNullOrWhiteSpace($UserInfo.AdditionalSANs)) {
         $additionalSANArray = $UserInfo.AdditionalSANs -split ',' | ForEach-Object { $_.Trim() }
         $sanList += $additionalSANArray
     }
+    $sanList = $sanList | Select-Object -Unique | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     
-    # Remove duplicates from SAN list
-    $sanList = $sanList | Select-Object -Unique
+    $subjectString = "CN=`"$($UserInfo.CommonName)`""
+    if (-not [string]::IsNullOrWhiteSpace($UserInfo.Organization)) {
+        $subjectString += ", O=`"$($UserInfo.Organization)`""
+    }
+    if (-not [string]::IsNullOrWhiteSpace($UserInfo.OrganizationalUnit)) {
+        $subjectString += ", OU=`"$($UserInfo.OrganizationalUnit)`""
+    }
+    if (-not [string]::IsNullOrWhiteSpace($UserInfo.City)) {
+        $subjectString += ", L=`"$($UserInfo.City)`""
+    }
+    if (-not [string]::IsNullOrWhiteSpace($UserInfo.State)) {
+        $subjectString += ", S=`"$($UserInfo.State)`""
+    }
+    $subjectString += ", C=$($UserInfo.Country)"
     
-    # Create a new SAN extension
-    $sanExtension = New-Object -ComObject X509Enrollment.CX509ExtensionAlternativeNames
-    $sanCollection = New-Object -ComObject X509Enrollment.CAlternativeNames
-    
-    foreach ($san in $sanList) {
-        if (-not [string]::IsNullOrWhiteSpace($san)) {
-            $altName = New-Object -ComObject X509Enrollment.CAlternativeName
-            $altName.InitializeFromString(0x3, $san) # 0x3 represents DNS name
-            $sanCollection.Add($altName)
+    $infContent = @"
+[Version]
+Signature="`$Windows NT`$"
+
+[NewRequest]
+Subject="$subjectString"
+KeySpec=1
+KeyLength=4096
+Exportable=TRUE
+MachineKeySet=TRUE
+SMIME=False
+PrivateKeyArchive=FALSE
+UserProtected=FALSE
+UseExistingKeySet=FALSE
+ProviderName="Microsoft Software Key Storage Provider"
+ProviderType=12
+RequestType=PKCS10
+KeyUsage=0xA0
+FriendlyName="$($UserInfo.FriendlyName)"
+
+[RequestAttributes]
+CertificateTemplate="$($UserInfo.CertificateTemplate)"
+"@
+    $infContent += "`r`n[EnhancedKeyUsageExtension]`r`n"
+    switch ($UserInfo.CertUsage) {
+        "serverAuth" {
+            $infContent += "OID=1.3.6.1.5.5.7.3.1 ; Server Authentication`r`n"
+        }
+        "clientAuth" {
+            $infContent += "OID=1.3.6.1.5.5.7.3.2 ; Client Authentication`r`n"
+        }
+        "both" {
+            $infContent += "OID=1.3.6.1.5.5.7.3.1 ; Server Authentication`r`n"
+            $infContent += "OID=1.3.6.1.5.5.7.3.2 ; Client Authentication`r`n"
         }
     }
-    
-    $sanExtension.InitializeEncode($sanCollection)
-    
-    # Create Enhanced Key Usage extension based on user selection
-    $ekuOids = New-Object -ComObject X509Enrollment.CObjectIds
-    
-    # Add selected usages based on user choice
-    if ($UserInfo.CertUsage -eq "clientAuth" -or $UserInfo.CertUsage -eq "both") {
-        # Client Authentication OID: 1.3.6.1.5.5.7.3.2
-        $clientAuthOid = New-Object -ComObject X509Enrollment.CObjectId
-        $clientAuthOid.InitializeFromValue("1.3.6.1.5.5.7.3.2")
-        $ekuOids.Add($clientAuthOid)
+    if ($sanList.Count -gt 0) {
+        $infContent += "`r`n[Extensions]`r`n"
+        $infContent += '2.5.29.17 = "{text}"' + "`r`n"
+        foreach ($san in $sanList) {
+            $infContent += '_continue_ = "dns=' + $san + '&"' + "`r`n"
+        }
     }
-    
-    if ($UserInfo.CertUsage -eq "serverAuth" -or $UserInfo.CertUsage -eq "both") {
-        # Server Authentication OID: 1.3.6.1.5.5.7.3.1
-        $serverAuthOid = New-Object -ComObject X509Enrollment.CObjectId
-        $serverAuthOid.InitializeFromValue("1.3.6.1.5.5.7.3.1")
-        $ekuOids.Add($serverAuthOid)
-    }
-    
-    # Create the extension
-    $ekuExtension = New-Object -ComObject X509Enrollment.CX509ExtensionEnhancedKeyUsage
-    $ekuExtension.InitializeEncode($ekuOids)
-    
-    # Create Key Usage extension for digital signature and key encipherment
-    $keyUsageExtension = New-Object -ComObject X509Enrollment.CX509ExtensionKeyUsage
-    # 0x20 = keyEncipherment, 0x80 = digitalSignature, combined = 0xA0
-    $keyUsageExtension.InitializeEncode(0xA0)
-    
-    # Create the Distinguished Name with only non-empty fields
-    $dn = New-Object -ComObject X509Enrollment.CX500DistinguishedName
-    
-    $dnParts = @()
-    $dnParts += "CN=$($UserInfo.CommonName)"
-    
-    if (-not [string]::IsNullOrWhiteSpace($UserInfo.Organization)) { 
-        $dnParts += "O=$($UserInfo.Organization)" 
-    }
-    
-    if (-not [string]::IsNullOrWhiteSpace($UserInfo.OrganizationalUnit)) { 
-        $dnParts += "OU=$($UserInfo.OrganizationalUnit)" 
-    }
-    
-    if (-not [string]::IsNullOrWhiteSpace($UserInfo.City)) { 
-        $dnParts += "L=$($UserInfo.City)" 
-    }
-    
-    if (-not [string]::IsNullOrWhiteSpace($UserInfo.State)) { 
-        $dnParts += "S=$($UserInfo.State)" 
-    }
-    
-    $dnParts += "C=$($UserInfo.Country)"
-    
-    if (-not [string]::IsNullOrWhiteSpace($UserInfo.Email)) { 
-        $dnParts += "E=$($UserInfo.Email)" 
-    }
-    
-    $dnString = $dnParts -join ", "
-    $dn.Encode($dnString, 0x0) # 0x0 represents XCN_CERT_NAME_STR_NONE
-    
-    # Create a private key using Microsoft Software Key Storage Provider
-    $privateKey = New-Object -ComObject X509Enrollment.CX509PrivateKey
-    $privateKey.ProviderName = "Microsoft Software Key Storage Provider"
-    $privateKey.KeySpec = 1 # XCN_AT_KEYEXCHANGE
-    $privateKey.Length = 4096
-    $privateKey.MachineContext = $true
-    $privateKey.ExportPolicy = 3 # 3 = Exportable and allows plaintext export
-    $privateKey.Create()
-    
-    # Create certificate request object
-    $cert = New-Object -ComObject X509Enrollment.CX509CertificateRequestPkcs10
-    $cert.InitializeFromPrivateKey(1, $privateKey, "") # 1 represents context = machine
-    $cert.Subject = $dn
-    $cert.FriendlyName = $UserInfo.FriendlyName
-    
-    # Add the SAN extension to the certificate
-    $cert.X509Extensions.Add($sanExtension)
-    
-    # Add the Enhanced Key Usage extension
-    $cert.X509Extensions.Add($ekuExtension)
-    
-    # Add the Key Usage extension
-    $cert.X509Extensions.Add($keyUsageExtension)
-    
-    # Create the enrollment request
-    $enrollment = New-Object -ComObject X509Enrollment.CX509Enrollment
-    $enrollment.InitializeFromRequest($cert)
-    
+    $infContent | Out-File -FilePath $configFile -Encoding ascii
+    Write-ActivityLog "Configuration file created at: $configFile" -Type Success
+    return $configFile
+}
+
+function Create-CSR {
+    param (
+        [hashtable]$UserInfo
+    )
     try {
-        # Create the request
-        $csr = $enrollment.CreateRequest(0x1) # 0x1 represents base64 encoding
-        
-        # Generate a unique ID for the request
-        $requestId = [guid]::NewGuid().ToString()
-        $requestFilePath = "$env:TEMP\CSR_$requestId.req"
-        
-        # Save the CSR to a file
-        $csr | Out-File -FilePath $requestFilePath -Encoding ascii
-        Write-ActivityLog "CSR saved to: $requestFilePath" -Type Information
-        
-        # Submit the request to the enterprise CA without waiting for immediate installation
-        Write-ActivityLog "Submitting CSR to the Enterprise CA..." -Type Information
-        
-        try {
-            Write-ActivityLog "Submitting CSR to the Enterprise CA..." -Type Information
-            $enrollment.Enroll()  # This submits the request and registers it as pending
-            Write-ActivityLog "Certificate request submitted. It is now pending approval." -Type Success
-            
-            [System.Windows.MessageBox]::Show(
-                "Certificate request has been submitted to the CA and is awaiting approval.`n`nThe CSR has been saved to: $requestFilePath`n`nThe request is registered in the Certificate Enrollment system and will be automatically installed when approved if auto-enrollment is enabled.",
-                "Request Submitted",
-                [System.Windows.MessageBoxButton]::OK,
-                [System.Windows.MessageBoxImage]::Information
-            )
+        $configFile = Create-CSRConfigFile -UserInfo $UserInfo
+        Write-ActivityLog "Generating CSR using certreq..." -Type Information
+        $csrFile = $sync.CurrentCSRFile
+        $certreqResult = & certreq -new "$configFile" "$csrFile" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-ActivityLog "CSR successfully created at: $csrFile" -Type Success
+            $sync.StatusBar.Text = "CSR created successfully"
+            $sync.SubmitCSRButton.IsEnabled = $true
+            [System.Windows.MessageBox]::Show("CSR has been created successfully at: $csrFile`n`nYou can now submit the CSR to your Certificate Authority.", "CSR Created", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+            return $true
         }
-        catch {
-            Write-ActivityLog "Error submitting CSR to the CA: $_" -Type Error
-            [System.Windows.MessageBox]::Show(
-                "Error submitting CSR to the CA: $_`n`nThe CSR has been saved to: $requestFilePath and can be submitted manually.",
-                "Error",
-                [System.Windows.MessageBoxButton]::OK,
-                [System.Windows.MessageBoxImage]::Error
-            )
+        else {
+            Write-ActivityLog "Error creating CSR: $certreqResult" -Type Error
+            $sync.StatusBar.Text = "Error creating CSR"
+            [System.Windows.MessageBox]::Show("Error creating CSR: $certreqResult", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            return $false
         }
-        
     }
     catch {
         Write-ActivityLog "Error creating CSR: $_" -Type Error
         $sync.StatusBar.Text = "Error creating CSR"
-        
-        [System.Windows.MessageBox]::Show(
-            "Error creating CSR: $_",
-            "Error",
-            [System.Windows.MessageBoxButton]::OK,
-            [System.Windows.MessageBoxImage]::Error
-        )
+        [System.Windows.MessageBox]::Show("Error creating CSR: $_", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+        return $false
     }
 }
 
-# Set up event handlers
-$sync.RefreshPreviewButton.Add_Click({
-    Update-Preview
-    Write-ActivityLog "Preview refreshed" -Type Information
-})
-
-$sync.CreateCSRButton.Add_Click({
+function Submit-CSR {
     try {
-        $userInfo = Get-FormInput
-        Create-CSR -UserInfo $userInfo
+        if (-not (Test-Path $sync.CurrentCSRFile)) {
+            Write-ActivityLog "No CSR file found. Please create a CSR first." -Type Error
+            $sync.StatusBar.Text = "CSR file not found"
+            [System.Windows.MessageBox]::Show("No CSR file found. Please create a CSR first.", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            return $false
+        }
+        Write-ActivityLog "Submitting CSR to the Certificate Authority..." -Type Information
+        $sync.StatusBar.Text = "Submitting CSR..."
+        
+        $responseFile = $sync.CurrentCSRFile -replace "\.req$", ".rsp"
+        $certFile = $sync.CurrentCSRFile -replace "\.req$", ".cer"
+        $sync.CurrentResponseFile = $responseFile
+        $sync.CurrentCertFile = $certFile
+        
+        $submitResult = & certreq -submit -config "$CA_Server" "$($sync.CurrentCSRFile)" "$responseFile" "$certFile" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            $requestIdMatch = [regex]::Match($submitResult, "RequestId:\s*(\d+)")
+            if ($requestIdMatch.Success) {
+                $caRequestId = $requestIdMatch.Groups[1].Value
+                $sync.CARequestId = $caRequestId
+                Write-ActivityLog "CSR submitted successfully. CA Request ID: $caRequestId" -Type Success
+                
+                $requestInfoFile = $sync.CurrentCSRFile -replace "\.req$", ".info"
+                @{
+                    RequestId    = $caRequestId
+                    ConfigFile   = $sync.CurrentConfigFile
+                    CSRFile      = $sync.CurrentCSRFile
+                    ResponseFile = $responseFile
+                    CertFile     = $certFile
+                    SubmittedAt  = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                } | ConvertTo-Json | Out-File -FilePath $requestInfoFile -Encoding utf8
+                
+                $sync.StatusBar.Text = "CSR submitted (Request ID: $caRequestId)"
+                [System.Windows.MessageBox]::Show("CSR has been submitted successfully to the CA.`n`nRequest ID: $caRequestId`n`nThis Request ID has been saved and can be used to retrieve the certificate later.", "CSR Submitted", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+                $sync.MainTabControl.SelectedIndex = 1
+                return $true
+            }
+            else {
+                Write-ActivityLog "CSR submitted but could not determine Request ID" -Type Warning
+                $sync.StatusBar.Text = "CSR submitted (unknown Request ID)"
+                [System.Windows.MessageBox]::Show("CSR has been submitted, but the Request ID could not be determined.`n`nOutput: $submitResult", "CSR Submitted", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
+                return $true
+            }
+        }
+        else {
+            Write-ActivityLog "Error submitting CSR: $submitResult" -Type Error
+            $sync.StatusBar.Text = "Error submitting CSR"
+            [System.Windows.MessageBox]::Show("Error submitting CSR: $submitResult", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            return $false
+        }
     }
     catch {
-        Write-ActivityLog "Error: $_" -Type Error
-        $sync.StatusBar.Text = "Error occurred"
-        
-        [System.Windows.MessageBox]::Show(
-            "An error occurred: $_",
-            "Error",
-            [System.Windows.MessageBoxButton]::OK,
-            [System.Windows.MessageBoxImage]::Error
-        )
-    }
-})
-
-# Add change handlers to update the preview automatically
-$updatePreviewControls = @(
-    $sync.CommonNameTextBox,
-    $sync.FriendlyNameTextBox,
-    $sync.TemplateComboBox,
-    $sync.CertUsageComboBox,
-    $sync.AdditionalSANsTextBox,
-    $sync.EmailTextBox,
-    $sync.OrganizationTextBox,
-    $sync.OrgUnitTextBox,
-    $sync.CityTextBox,
-    $sync.StateTextBox,
-    $sync.CountryTextBox
-)
-
-foreach ($control in $updatePreviewControls) {
-    if ($control -is [System.Windows.Controls.TextBox]) {
-        $control.Add_TextChanged({
-            Update-Preview
-        })
-    }
-    elseif ($control -is [System.Windows.Controls.ComboBox]) {
-        $control.Add_SelectionChanged({
-            Update-Preview
-        })
+        Write-ActivityLog "Error submitting CSR: $_" -Type Error
+        $sync.StatusBar.Text = "Error submitting CSR"
+        [System.Windows.MessageBox]::Show("Error submitting CSR: $_", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+        return $false
     }
 }
 
-# Initialize the preview
-Update-Preview
+$sync.RefreshPreviewButton.Add_Click({ Update-Preview })
+$sync.CreateCSRButton.Add_Click({
+    $userInfo = Get-FormInput
+    if (Create-CSR -UserInfo $userInfo) {
+        Update-Preview
+    }
+})
+$sync.SubmitCSRButton.Add_Click({ Submit-CSR })
 
-# Log startup
-Write-ActivityLog "CSR Request Tool started" -Type Information
-$sync.StatusBar.Text = "Ready"
-
-# Show the window
-$sync.Window.ShowDialog() | Out-Null
+$window.ShowDialog() | Out-Null
