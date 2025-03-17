@@ -700,6 +700,323 @@ function Submit-CSR {
     }
 }
 
+function Check-CertificateStatus {
+    try {
+        $requestId = $sync.RequestIdTextBox.Text.Trim()
+        if ([string]::IsNullOrWhiteSpace($requestId)) {
+            Write-ActivityLog "Please enter a valid Request ID" -Type Warning
+            return
+        }
+
+        Write-ActivityLog "Checking certificate status for Request ID: $requestId" -Type Information
+        $sync.StatusBar.Text = "Checking certificate status..."
+        
+        $checkResult = & certutil -config "$CA_Server" -getrequeststate $requestId 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            $dispositionMatch = [regex]::Match($checkResult, "RequestStatus:\s*(\d+).*RequestStatusString:\s*(.+?)\r?\n")
+            if ($dispositionMatch.Success) {
+                $dispositionCode = $dispositionMatch.Groups[1].Value
+                $dispositionText = $dispositionMatch.Groups[2].Value.Trim()
+                
+                $sync.CertStatusTextBlock.Text = $dispositionText
+                $sync.DispositionTextBlock.Text = "Disposition: $dispositionCode"
+                $sync.LastCheckedTextBlock.Text = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                
+                Write-ActivityLog "Certificate status: $dispositionText (Code: $dispositionCode)" -Type Information
+                
+                switch ($dispositionCode) {
+                    "0" { # Pending
+                        $sync.RetrieveButton.IsEnabled = $false
+                    }
+                    "2" { # Denied
+                        $sync.RetrieveButton.IsEnabled = $false
+                    }
+                    "3" { # Issued
+                        $sync.RetrieveButton.IsEnabled = $true
+                        Write-ActivityLog "Certificate is ready to be retrieved" -Type Success
+                    }
+                    "20" { # Certificate issued
+                        $sync.RetrieveButton.IsEnabled = $true
+                        Write-ActivityLog "Certificate is ready to be retrieved" -Type Success
+                    }
+                    default {
+                        $sync.RetrieveButton.IsEnabled = $false
+                    }
+                }
+            }
+            else {
+                Write-ActivityLog "Could not determine certificate status from response" -Type Warning
+                $sync.CertStatusTextBlock.Text = "Unknown"
+                $sync.DispositionTextBlock.Text = "Could not determine"
+                $sync.LastCheckedTextBlock.Text = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            }
+        }
+        else {
+            Write-ActivityLog "Error checking certificate status: $checkResult" -Type Error
+            $sync.CertStatusTextBlock.Text = "Error"
+            $sync.DispositionTextBlock.Text = "Error checking status"
+            $sync.LastCheckedTextBlock.Text = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        }
+        
+        $sync.StatusBar.Text = "Ready"
+    }
+    catch {
+        Write-ActivityLog "Error checking certificate status: $_" -Type Error
+        $sync.StatusBar.Text = "Error checking certificate status"
+    }
+}
+
+function Browse-CertificateFile {
+    $openFileDialog = New-Object System.Windows.Forms.OpenFileDialog
+    $openFileDialog.Title = "Select Certificate File"
+    $openFileDialog.Filter = "Certificate Files (*.cer;*.crt;*.p7b)|*.cer;*.crt;*.p7b|All Files (*.*)|*.*"
+    $openFileDialog.InitialDirectory = $CertificateStoragePath
+    
+    if ($openFileDialog.ShowDialog() -eq "OK") {
+        $sync.CertFileTextBox.Text = $openFileDialog.FileName
+        Get-CertificateDetails -CertPath $openFileDialog.FileName
+        $sync.InstallButton.IsEnabled = $true
+    }
+}
+
+function Retrieve-Certificate {
+    try {
+        $requestId = $sync.RequestIdTextBox.Text.Trim()
+        if ([string]::IsNullOrWhiteSpace($requestId)) {
+            Write-ActivityLog "Please enter a valid Request ID" -Type Warning
+            return
+        }
+        
+        Write-ActivityLog "Retrieving certificate for Request ID: $requestId" -Type Information
+        $sync.StatusBar.Text = "Retrieving certificate..."
+        
+        # Create certificate file path
+        $certFileName = "Certificate_$requestId.cer"
+        $certFilePath = Join-Path -Path $CertificateStoragePath -ChildPath $certFileName
+        
+        # Retrieve the certificate
+        $retrieveResult = & certreq -retrieve -config "$CA_Server" $requestId "$certFilePath" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-ActivityLog "Certificate retrieved successfully: $certFilePath" -Type Success
+            $sync.CertFileTextBox.Text = $certFilePath
+            $sync.StatusBar.Text = "Certificate retrieved successfully"
+            
+            # Display certificate details
+            Get-CertificateDetails -CertPath $certFilePath
+            
+            # Enable install button
+            $sync.InstallButton.IsEnabled = $true
+            
+            [System.Windows.MessageBox]::Show("Certificate has been successfully retrieved and saved to:`n$certFilePath", "Certificate Retrieved", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+        }
+        else {
+            Write-ActivityLog "Error retrieving certificate: $retrieveResult" -Type Error
+            $sync.StatusBar.Text = "Error retrieving certificate"
+            [System.Windows.MessageBox]::Show("Error retrieving certificate: $retrieveResult", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+        }
+    }
+    catch {
+        Write-ActivityLog "Error retrieving certificate: $_" -Type Error
+        $sync.StatusBar.Text = "Error retrieving certificate"
+        [System.Windows.MessageBox]::Show("Error retrieving certificate: $_", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+    }
+}
+
+function Install-Certificate {
+    try {
+        $certPath = $sync.CertFileTextBox.Text.Trim()
+        if (-not (Test-Path $certPath)) {
+            Write-ActivityLog "Certificate file not found: $certPath" -Type Error
+            [System.Windows.MessageBox]::Show("Certificate file not found: $certPath", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            return
+        }
+        
+        Write-ActivityLog "Installing certificate from: $certPath" -Type Information
+        $sync.StatusBar.Text = "Installing certificate..."
+        
+        # Install the certificate
+        $installResult = & certreq -accept "$certPath" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-ActivityLog "Certificate installed successfully" -Type Success
+            $sync.StatusBar.Text = "Certificate installed successfully"
+            $sync.ExportButton.IsEnabled = $true
+            [System.Windows.MessageBox]::Show("Certificate has been successfully installed in the certificate store.", "Certificate Installed", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+        }
+        else {
+            Write-ActivityLog "Error installing certificate: $installResult" -Type Error
+            $sync.StatusBar.Text = "Error installing certificate"
+            [System.Windows.MessageBox]::Show("Error installing certificate: $installResult", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+        }
+    }
+    catch {
+        Write-ActivityLog "Error installing certificate: $_" -Type Error
+        $sync.StatusBar.Text = "Error installing certificate"
+        [System.Windows.MessageBox]::Show("Error installing certificate: $_", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+    }
+}
+
+function Get-CertificateDetails {
+    param (
+        [string]$CertPath
+    )
+    
+    try {
+        if (-not (Test-Path $CertPath)) {
+            $sync.CertDetailsTextBlock.Text = "Certificate file not found"
+            return
+        }
+        
+        Write-ActivityLog "Getting certificate details from: $CertPath" -Type Information
+        
+        $certDetails = & certutil -verify -silent "$CertPath" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            # Filter and format the certificate details
+            $detailsText = $certDetails -join "`n"
+            $sync.CertDetailsTextBlock.Text = $detailsText
+        }
+        else {
+            $sync.CertDetailsTextBlock.Text = "Error retrieving certificate details: $certDetails"
+            Write-ActivityLog "Error retrieving certificate details: $certDetails" -Type Error
+        }
+    }
+    catch {
+        $sync.CertDetailsTextBlock.Text = "Error retrieving certificate details: $_"
+        Write-ActivityLog "Error retrieving certificate details: $_" -Type Error
+    }
+}
+
+function Export-CertificateWithPrivateKey {
+    try {
+        # Get current certificate information from the file
+        $certPath = $sync.CertFileTextBox.Text.Trim()
+        if (-not (Test-Path $certPath)) {
+            Write-ActivityLog "Certificate file not found: $certPath" -Type Error
+            [System.Windows.MessageBox]::Show("Certificate file not found: $certPath", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            return
+        }
+        
+        # Get certificate details to find the subject
+        $certSubject = & certutil -dump "$certPath" | Select-String -Pattern "Subject:" | ForEach-Object { $_ -replace ".*Subject: ", "" }
+        if (-not $certSubject) {
+            Write-ActivityLog "Could not determine certificate subject" -Type Error
+            [System.Windows.MessageBox]::Show("Could not determine certificate subject", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            return
+        }
+        
+        # Create password dialog
+        $passwordForm = New-Object System.Windows.Forms.Form
+        $passwordForm.Text = "Enter PFX Password"
+        $passwordForm.Size = New-Object System.Drawing.Size(350, 200)
+        $passwordForm.StartPosition = "CenterScreen"
+        $passwordForm.FormBorderStyle = "FixedDialog"
+        $passwordForm.MaximizeBox = $false
+        $passwordForm.MinimizeBox = $false
+        
+        $passwordLabel = New-Object System.Windows.Forms.Label
+        $passwordLabel.Text = "Enter password to protect the PFX file:"
+        $passwordLabel.Size = New-Object System.Drawing.Size(300, 20)
+        $passwordLabel.Location = New-Object System.Drawing.Point(10, 20)
+        
+        $passwordTextBox = New-Object System.Windows.Forms.MaskedTextBox
+        $passwordTextBox.PasswordChar = '*'
+        $passwordTextBox.Size = New-Object System.Drawing.Size(300, 20)
+        $passwordTextBox.Location = New-Object System.Drawing.Point(10, 50)
+        
+        $confirmLabel = New-Object System.Windows.Forms.Label
+        $confirmLabel.Text = "Confirm password:"
+        $confirmLabel.Size = New-Object System.Drawing.Size(300, 20)
+        $confirmLabel.Location = New-Object System.Drawing.Point(10, 80)
+        
+        $confirmTextBox = New-Object System.Windows.Forms.MaskedTextBox
+        $confirmTextBox.PasswordChar = '*'
+        $confirmTextBox.Size = New-Object System.Drawing.Size(300, 20)
+        $confirmTextBox.Location = New-Object System.Drawing.Point(10, 110)
+        
+        $okButton = New-Object System.Windows.Forms.Button
+        $okButton.Text = "OK"
+        $okButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $okButton.Size = New-Object System.Drawing.Size(75, 23)
+        $okButton.Location = New-Object System.Drawing.Point(75, 140)
+        
+        $cancelButton = New-Object System.Windows.Forms.Button
+        $cancelButton.Text = "Cancel"
+        $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+        $cancelButton.Size = New-Object System.Drawing.Size(75, 23)
+        $cancelButton.Location = New-Object System.Drawing.Point(165, 140)
+        
+        $passwordForm.Controls.Add($passwordLabel)
+        $passwordForm.Controls.Add($passwordTextBox)
+        $passwordForm.Controls.Add($confirmLabel)
+        $passwordForm.Controls.Add($confirmTextBox)
+        $passwordForm.Controls.Add($okButton)
+        $passwordForm.Controls.Add($cancelButton)
+        $passwordForm.AcceptButton = $okButton
+        $passwordForm.CancelButton = $cancelButton
+        
+        # Show password dialog
+        $result = $passwordForm.ShowDialog()
+        if ($result -ne [System.Windows.Forms.DialogResult]::OK) {
+            return
+        }
+        
+        # Validate passwords match
+        if ($passwordTextBox.Text -ne $confirmTextBox.Text) {
+            [System.Windows.MessageBox]::Show("Passwords do not match", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            return
+        }
+        
+        # Create save file dialog
+        $saveFileDialog = New-Object System.Windows.Forms.SaveFileDialog
+        $saveFileDialog.Title = "Save PFX File"
+        $saveFileDialog.Filter = "PFX Files (*.pfx)|*.pfx|All Files (*.*)|*.*"
+        $saveFileDialog.InitialDirectory = $CertificateStoragePath
+        $saveFileDialog.FileName = [System.IO.Path]::GetFileNameWithoutExtension($certPath) + ".pfx"
+        
+        if ($saveFileDialog.ShowDialog() -ne "OK") {
+            return
+        }
+        
+        $pfxPath = $saveFileDialog.FileName
+        Write-ActivityLog "Exporting certificate with private key to: $pfxPath" -Type Information
+        $sync.StatusBar.Text = "Exporting certificate with private key..."
+        
+        # Export the certificate with private key
+        $exportCmd = @"
+        # Find certificate by subject
+        `$cert = Get-ChildItem -Path Cert:\LocalMachine\My -Recurse | Where-Object { `$_.Subject -like "*$certSubject*" } | Select-Object -First 1
+        if (`$cert) {
+            # Export to PFX
+            Export-PfxCertificate -Cert `$cert -FilePath '$pfxPath' -Password (ConvertTo-SecureString -String '$($passwordTextBox.Text)' -Force -AsPlainText) -ChainOption BuildChain
+            if (Test-Path '$pfxPath') {
+                Write-Output "SUCCESS: Certificate exported to $pfxPath"
+            } else {
+                Write-Output "ERROR: Failed to create PFX file"
+            }
+        } else {
+            Write-Output "ERROR: Certificate not found in store with subject: $certSubject"
+        }
+"@
+        
+        $exportResult = PowerShell -Command $exportCmd 2>&1
+        
+        if ($exportResult -like "*SUCCESS:*") {
+            Write-ActivityLog "Certificate exported successfully: $pfxPath" -Type Success
+            $sync.StatusBar.Text = "Certificate exported successfully"
+            [System.Windows.MessageBox]::Show("Certificate with private key has been successfully exported to:`n$pfxPath", "Export Successful", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+        }
+        else {
+            Write-ActivityLog "Error exporting certificate: $exportResult" -Type Error
+            $sync.StatusBar.Text = "Error exporting certificate"
+            [System.Windows.MessageBox]::Show("Error exporting certificate: $exportResult", "Export Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+        }
+    }
+    catch {
+        Write-ActivityLog "Error exporting certificate: $_" -Type Error
+        $sync.StatusBar.Text = "Error exporting certificate"
+        [System.Windows.MessageBox]::Show("Error exporting certificate: $_", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+    }
+}
+
 $sync.RefreshPreviewButton.Add_Click({ Update-Preview })
 $sync.CreateCSRButton.Add_Click({
     $userInfo = Get-FormInput
@@ -708,5 +1025,20 @@ $sync.CreateCSRButton.Add_Click({
     }
 })
 $sync.SubmitCSRButton.Add_Click({ Submit-CSR })
+
+# Certificate retrieval tab button handlers
+$sync.CheckStatusButton.Add_Click({ Check-CertificateStatus })
+$sync.BrowseCertButton.Add_Click({ Browse-CertificateFile })
+$sync.RetrieveButton.Add_Click({ Retrieve-Certificate })
+$sync.InstallButton.Add_Click({ Install-Certificate })
+$sync.ExportButton.Add_Click({ Export-CertificateWithPrivateKey })
+
+# Initialize button states for the certificate tab
+$sync.RetrieveButton.IsEnabled = $false
+$sync.InstallButton.IsEnabled = $false
+$sync.ExportButton.IsEnabled = $false
+
+# Set up initial log message
+Write-ActivityLog "CSR Request Tool started" -Type Information
 
 $window.ShowDialog() | Out-Null
