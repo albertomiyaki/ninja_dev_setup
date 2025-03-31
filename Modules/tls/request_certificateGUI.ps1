@@ -11,7 +11,12 @@ $CertificateStoragePath = "C:\temp\tls\csr_gui\"
 # System information variables
 $hostname = ([System.Net.Dns]::GetHostEntry($env:computerName)).HostName
 $shortHostname = $env:COMPUTERNAME
-$defaultEmail = "user@domain.com"
+# $defaultEmail = "firstname.lastname@example.com"
+# $defaultEmail = Get-ADUser -Identity $env:USERNAME | Select-Object -ExpandProperty UserPrincipalName
+$objUser = New-Object DirectoryServices.DirectorySearcher
+$objUser.Filter = "(&(objectCategory=User)(sAMAccountName=$env:USERNAME))"
+$defaultEmail = $objUser.FindOne().Properties.userprincipalname
+
 
 function Test-Administrator {
     $currentUser = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -77,7 +82,7 @@ function Write-ActivityLog {
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="CSR Request Tool" 
-    Height="720" 
+    Height="920" 
     Width="700"
     WindowStartupLocation="CenterScreen">
     <Window.Resources>
@@ -422,7 +427,12 @@ $sync.CertDetailsTextBlock = $window.FindName("CertDetailsTextBlock")
 $sync.CommonNameTextBox.Text = $hostname
 $sync.FriendlyNameTextBox.Text = "$shortHostname Certificate"
 $sync.EmailTextBox.Text = $defaultEmail
-$sync.CountryTextBox.Text = "US"
+$sync.OrganizationTextBox.Text = "YourCompany"
+$sync.OrgUnitTextBox.Text = "YourOrg"
+$sync.CityTextBox.Text = "YourCity"
+$sync.StateTextBox.Text = "YourState"
+$sync.CountryTextBox.Text = "YourCountry"
+$sync.AdditionalSANsTextBox.Text = "$hostname,$shortHostname"
 
 $sync.SubmitCSRButton.IsEnabled = $false
 
