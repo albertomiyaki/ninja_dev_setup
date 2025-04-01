@@ -160,16 +160,17 @@ function Write-ActivityLog {
         </Border>
         
         <!-- Folder Selection Bar -->
-        <Grid Grid.Row="1" Background="#f0f0f0" Padding="10">
+        <Grid Grid.Row="1" Background="#f0f0f0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <Label Grid.Column="0" Content="Working Directory:" VerticalAlignment="Center"/>
-            <TextBox Grid.Column="1" x:Name="WorkingDirTextBox" Margin="5,0,5,0" IsReadOnly="True"/>
-            <Button Grid.Column="2" x:Name="BrowseFolderButton" Content="Browse" Width="80"
-                    Style="{StaticResource DefaultButton}"/>
+            <Label Grid.Column="0" Content="Working Directory:" VerticalAlignment="Center" Margin="10,5"/>
+            <TextBox Grid.Column="1" x:Name="WorkingDirTextBox" Margin="5,5"/>
+            <Button Grid.Column="2" x:Name="BrowseFolderButton" 
+                    Content="Browse" Style="{StaticResource DefaultButton}" 
+                    Width="80" Margin="5,5"/>
         </Grid>
         
         <!-- Main Content -->
