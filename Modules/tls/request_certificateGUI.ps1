@@ -258,6 +258,14 @@ function Write-ActivityLog {
                                          ToolTip="Two-letter country code (e.g. US, UK, CA)"/>
                             </Grid>
                         </GroupBox>
+                        
+                        <!-- Add buttons at the bottom of the Create CSR tab -->
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,10,0,0">
+                            <Button x:Name="GenerateCSRButton" Content="Generate CSR" 
+                                    Style="{StaticResource DefaultButton}" Margin="0,0,10,0"/>
+                            <Button x:Name="SendToCAButton" Content="Submit to CA" 
+                                    Style="{StaticResource DefaultButton}"/>
+                        </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
@@ -346,6 +354,12 @@ catch {
 }
 
 $sync.Window = $window
+$sync.GenerateCSRButton = $window.FindName("GenerateCSRButton")
+$sync.SendToCAButton = $window.FindName("SendToCAButton")
+$sync.RetrieveCertButton = $window.FindName("RetrieveCertButton")
+$sync.InstallButton = $window.FindName("InstallButton")
+$sync.ExportButton = $window.FindName("ExportButton")
+$sync.RefreshPreviewButton = $window.FindName("RefreshPreviewButton")
 $sync.CommonNameTextBox = $window.FindName("CommonNameTextBox")
 $sync.FriendlyNameTextBox = $window.FindName("FriendlyNameTextBox")
 $sync.TemplateComboBox = $window.FindName("TemplateComboBox")
@@ -358,9 +372,6 @@ $sync.CityTextBox = $window.FindName("CityTextBox")
 $sync.StateTextBox = $window.FindName("StateTextBox")
 $sync.CountryTextBox = $window.FindName("CountryTextBox")
 $sync.PreviewTextBlock = $window.FindName("PreviewTextBlock")
-$sync.RefreshPreviewButton = $window.FindName("RefreshPreviewButton")
-$sync.CreateCSRButton = $window.FindName("CreateCSRButton")
-$sync.SubmitCSRButton = $window.FindName("SubmitCSRButton")
 $sync.StatusBar = $window.FindName("StatusBar")
 $sync.LogTextBox = $window.FindName("LogTextBox")
 $sync.MainTabControl = $window.FindName("MainTabControl")
@@ -373,13 +384,11 @@ $sync.CertStatusTextBlock = $window.FindName("CertStatusTextBlock")
 $sync.DispositionTextBlock = $window.FindName("DispositionTextBlock")
 $sync.LastCheckedTextBlock = $window.FindName("LastCheckedTextBlock")
 $sync.RetrieveButton = $window.FindName("RetrieveButton")
-$sync.InstallButton = $window.FindName("InstallButton")
 $sync.CertDetailsTextBlock = $window.FindName("CertDetailsTextBlock")
 
 $sync.ExportPathTextBox = $window.FindName("ExportPathTextBox")
 $sync.ExportPasswordTextBox = $window.FindName("ExportPasswordTextBox")
 $sync.ConfirmPasswordTextBox = $window.FindName("ConfirmPasswordTextBox")
-$sync.ExportButton = $window.FindName("ExportButton")
 
 # Initialize form with default values
 $sync.CommonNameTextBox.Text = $hostname
@@ -391,8 +400,6 @@ $sync.CityTextBox.Text = "YourCity"
 $sync.StateTextBox.Text = "YourState"
 $sync.CountryTextBox.Text = "YourCountry"
 $sync.AdditionalSANsTextBox.Text = "$hostname,$shortHostname"
-
-$sync.SubmitCSRButton.IsEnabled = $false
 
 foreach ($template in $availableTemplates) {
     $item = New-Object System.Windows.Controls.ComboBoxItem
@@ -612,7 +619,6 @@ function Create-CSR {
         if ($LASTEXITCODE -eq 0) {
             Write-ActivityLog "CSR successfully created at: $csrFile" -Type Success
             $sync.StatusBar.Text = "CSR created successfully"
-            $sync.SubmitCSRButton.IsEnabled = $true
             [System.Windows.MessageBox]::Show("CSR has been created successfully at: $csrFile`n`nYou can now submit the CSR to your Certificate Authority.", "CSR Created", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
             return $true
         }
@@ -1123,7 +1129,7 @@ $sync.ExportButton.Add_Click({
 
     $password = $sync.ExportPasswordTextBox.SecurePassword
     $confirmPassword = $sync.ConfirmPasswordTextBox.SecurePassword
-    $cerPath = "$workingDir\$($sync.txtCN.Text).cer"
+    $cerPath = "$workingDir\$($sync.CommonNameTextBox.Text).cer"
 
     if (-not (Test-Path $cerPath)) {
         [System.Windows.MessageBox]::Show("Certificate file not found. Please request a certificate first.", "Error", [System.Windows.MessageBoxButtons]::OK, [System.Windows.MessageBoxIcon]::Error)
@@ -1138,13 +1144,21 @@ $sync.ExportButton.Add_Click({
 })
 
 # Update export path when CN changes
-$sync.txtCN.Add_TextChanged({
-    $sync.ExportPathTextBox.Text = "$workingDir\$($sync.txtCN.Text).p12"
-})
+if ($sync.CommonNameTextBox) {
+    $sync.CommonNameTextBox.Add_TextChanged({
+        if ($sync.ExportPathTextBox) {
+            $sync.ExportPathTextBox.Text = "$workingDir\$($sync.CommonNameTextBox.Text).p12"
+        }
+    })
+}
 
 # Initialize button states
-$sync.SendToCAButton.IsEnabled = $false
-$sync.RetrieveCertButton.IsEnabled = $true
+if ($sync.SendToCAButton) {
+    $sync.SendToCAButton.IsEnabled = $false
+}
+if ($sync.RetrieveCertButton) {
+    $sync.RetrieveCertButton.IsEnabled = $true
+}
 
 # Update the working directory initialization
 if (-not (Test-Path $CertificateStoragePath)) {
