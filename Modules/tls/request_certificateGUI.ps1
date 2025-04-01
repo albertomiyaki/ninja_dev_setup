@@ -1,4 +1,4 @@
-# CSR Request - GUI Tool with certreq
+# CSR GUI Tool
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
@@ -371,8 +371,6 @@ $sync.OrgUnitTextBox = $window.FindName("OrgUnitTextBox")
 $sync.CityTextBox = $window.FindName("CityTextBox")
 $sync.StateTextBox = $window.FindName("StateTextBox")
 $sync.CountryTextBox = $window.FindName("CountryTextBox")
-$sync.PreviewTextBlock = $window.FindName("PreviewTextBlock")
-$sync.StatusBar = $window.FindName("StatusBar")
 $sync.LogTextBox = $window.FindName("LogTextBox")
 $sync.MainTabControl = $window.FindName("MainTabControl")
 
@@ -484,7 +482,6 @@ function Update-Preview {
     $preview += "`n`nKey Size: 4096 bits"
     $preview += "`n`nKey Storage Provider: Microsoft Software Key Storage Provider"
     $preview += "`n`nPrivate Key: Exportable"
-    $sync.PreviewTextBlock.Text = $preview
 }
 
 function Get-FormInput {
@@ -618,20 +615,17 @@ function Create-CSR {
         $certreqResult = & certreq -new "$configFile" "$csrFile" 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-ActivityLog "CSR successfully created at: $csrFile" -Type Success
-            $sync.StatusBar.Text = "CSR created successfully"
             [System.Windows.MessageBox]::Show("CSR has been created successfully at: $csrFile`n`nYou can now submit the CSR to your Certificate Authority.", "CSR Created", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
             return $true
         }
         else {
             Write-ActivityLog "Error creating CSR: $certreqResult" -Type Error
-            $sync.StatusBar.Text = "Error creating CSR"
             [System.Windows.MessageBox]::Show("Error creating CSR: $certreqResult", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
             return $false
         }
     }
     catch {
         Write-ActivityLog "Error creating CSR: $_" -Type Error
-        $sync.StatusBar.Text = "Error creating CSR"
         [System.Windows.MessageBox]::Show("Error creating CSR: $_", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
         return $false
     }
@@ -670,9 +664,7 @@ function Submit-CSR {
                 Write-ActivityLog "CSR submitted successfully. Request ID: $caRequestId" -Type Success
                 
                 # Update status and GUI
-                $sync.StatusBar.Text = "CSR submitted (Request ID: $caRequestId)"
                 $sync.RequestIdTextBox.Text = $caRequestId
-                $sync.StatusTextBlock.Text = "CSR submitted with Request ID: $caRequestId"
                 
                 # Save request information
                 $requestInfoFile = Join-Path $workingDir "$baseFileName.info"
@@ -719,7 +711,6 @@ function Check-CertificateStatus {
         }
 
         Write-ActivityLog "Checking certificate status for Request ID: $requestId" -Type Information
-        $sync.StatusBar.Text = "Checking certificate status..."
         
         $checkResult = & certutil -config "$CA_Server" -getrequeststate $requestId 2>&1
         if ($LASTEXITCODE -eq 0) {
@@ -768,11 +759,9 @@ function Check-CertificateStatus {
             $sync.LastCheckedTextBlock.Text = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
         }
         
-        $sync.StatusBar.Text = "Ready"
     }
     catch {
         Write-ActivityLog "Error checking certificate status: $_" -Type Error
-        $sync.StatusBar.Text = "Error checking certificate status"
     }
 }
 
@@ -799,10 +788,9 @@ function Retrieve-Certificate {
         
         Write-ActivityLog "Retrieving certificate for Request ID: $requestId" -Type Information
         
-        # Use working directory for certificate file
+        # Use working directory for temporary certificate file
         $workingDir = $sync.WorkingDirTextBox.Text
-        $certFileName = "Certificate_$requestId.cer"
-        $certFilePath = Join-Path -Path $workingDir -ChildPath $certFileName
+        $tempCertFile = Join-Path -Path $workingDir -ChildPath "temp_$requestId.cer"
         
         # First check if we have info file for this request
         $infoFiles = Get-ChildItem -Path $workingDir -Filter "*.info"
@@ -810,31 +798,49 @@ function Retrieve-Certificate {
         foreach ($file in $infoFiles) {
             $info = Get-Content $file.FullName | ConvertFrom-Json
             if ($info.RequestId -eq $requestId) {
-                $certFilePath = $info.CertFile
+                $tempCertFile = $info.CertFile
                 Write-ActivityLog "Found existing request info, using saved certificate path" -Type Information
                 break
             }
         }
         
-        # Retrieve the certificate
-        $retrieveResult = & certreq -retrieve -config "$CA_Server" $requestId "$certFilePath" 2>&1
+        # Retrieve the certificate to temporary file
+        $retrieveResult = & certreq -retrieve -config "$CA_Server" $requestId "$tempCertFile" 2>&1
         if ($LASTEXITCODE -eq 0) {
-            Write-ActivityLog "Certificate retrieved successfully: $certFilePath" -Type Success
-            $sync.StatusBar.Text = "Certificate retrieved successfully"
-            $sync.CertFileTextBox.Text = $certFilePath
+            # Read the certificate to get the subject
+            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($tempCertFile)
+            $subject = $cert.Subject
             
-            return $certFilePath
+            # Extract CN from subject
+            $cnMatch = [regex]::Match($subject, "CN=([^,]+)")
+            $commonName = if ($cnMatch.Success) { $cnMatch.Groups[1].Value.Trim('"') } else { "cert_$requestId" }
+            
+            # Create final certificate path with common name
+            $finalCertFile = Join-Path -Path $workingDir -ChildPath "$commonName.cer"
+            
+            # If file already exists, add number suffix
+            $counter = 1
+            while (Test-Path $finalCertFile) {
+                $finalCertFile = Join-Path -Path $workingDir -ChildPath "$commonName($counter).cer"
+                $counter++
+            }
+            
+            # Move the temporary file to final location
+            Move-Item -Path $tempCertFile -Destination $finalCertFile -Force
+            
+            Write-ActivityLog "Certificate retrieved successfully: $finalCertFile" -Type Success
+            $sync.CertFileTextBox.Text = $finalCertFile
+            
+            return $finalCertFile
         }
         else {
             Write-ActivityLog "Error retrieving certificate: $retrieveResult" -Type Error
-            $sync.StatusBar.Text = "Error retrieving certificate"
             [System.Windows.MessageBox]::Show("Error retrieving certificate: $retrieveResult", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
             return $null
         }
     }
     catch {
         Write-ActivityLog "Error retrieving certificate: $_" -Type Error
-        $sync.StatusBar.Text = "Error retrieving certificate"
         return $null
     }
 }
@@ -853,27 +859,22 @@ function Install-Certificate {
         }
         
         Write-ActivityLog "Installing certificate from: $CertPath" -Type Information
-        $sync.StatusBar.Text = "Installing certificate..."
-        
+                
         # Install the certificate
-        $installResult = & certreq -accept "$CertPath" 2>&1
+        $installResult = & certreq -accept -machine "$CertPath" 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-ActivityLog "Certificate installed successfully" -Type Success
-            $sync.StatusBar.Text = "Certificate installed successfully"
-            # $sync.ExportButton.IsEnabled = $true
             [System.Windows.MessageBox]::Show("Certificate has been successfully installed in the certificate store.", "Certificate Installed", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
             return $true
         }
         else {
             Write-ActivityLog "Error installing certificate: $installResult" -Type Error
-            $sync.StatusBar.Text = "Error installing certificate"
             [System.Windows.MessageBox]::Show("Error installing certificate: $installResult", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
             return $false
         }
     }
     catch {
         Write-ActivityLog "Error installing certificate: $_" -Type Error
-        $sync.StatusBar.Text = "Error installing certificate"
         [System.Windows.MessageBox]::Show("Error installing certificate: $_", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
         return $false
     }
@@ -963,7 +964,6 @@ function Export-Pkcs12 {
     }
     catch {
         Write-ActivityLog "Error exporting certificate: $_" -Type Error
-        $sync.StatusBar.Text = "Error exporting certificate"
         [System.Windows.MessageBox]::Show("Error exporting certificate: $_", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
     }
 }
@@ -1056,8 +1056,6 @@ function Retrieve-CertificateManual {
         
         if ($LASTEXITCODE -eq 0) {
             Write-ActivityLog "Certificate retrieved successfully: $certFile" -Type Success
-            $sync.StatusBar.Text = "Certificate retrieved successfully"
-            $sync.StatusTextBlock.Text = "Certificate retrieved successfully"
             
             # Ask if user wants to install the certificate
             $installResult = [System.Windows.MessageBox]::Show(
@@ -1073,13 +1071,11 @@ function Retrieve-CertificateManual {
         }
         else {
             Write-ActivityLog "Error retrieving certificate: $retrieveResult" -Type Error
-            $sync.StatusBar.Text = "Error retrieving certificate"
             [System.Windows.MessageBox]::Show("Error retrieving certificate: $retrieveResult", "Error")
         }
     }
     catch {
         Write-ActivityLog "Error retrieving certificate: $_" -Type Error
-        $sync.StatusBar.Text = "Error retrieving certificate"
     }
 }
 
@@ -1123,7 +1119,9 @@ $sync.ExportButton.Add_Click({
     $exportPath = $sync.ExportPathTextBox.Text
     
     if ([string]::IsNullOrWhiteSpace($exportPath)) {
-        [System.Windows.MessageBox]::Show("Please specify an export path.", "Error", [System.Windows.MessageBoxButtons]::OK, [System.Windows.MessageBoxIcon]::Error)
+        [System.Windows.MessageBox]::Show("Please specify an export path.", "Error", 
+            [System.Windows.MessageBoxButton]::OK, 
+            [System.Windows.MessageBoxImage]::Error)
         return
     }
 
@@ -1132,14 +1130,18 @@ $sync.ExportButton.Add_Click({
     $cerPath = "$workingDir\$($sync.CommonNameTextBox.Text).cer"
 
     if (-not (Test-Path $cerPath)) {
-        [System.Windows.MessageBox]::Show("Certificate file not found. Please request a certificate first.", "Error", [System.Windows.MessageBoxButtons]::OK, [System.Windows.MessageBoxIcon]::Error)
+        [System.Windows.MessageBox]::Show("Certificate file not found. Please request a certificate first.", "Error", 
+            [System.Windows.MessageBoxButton]::OK, 
+            [System.Windows.MessageBoxImage]::Error)
         return
     }
 
     $result = Export-Pkcs12 -CertificatePath $cerPath -ExportPath $exportPath -Password $password -ConfirmPassword $confirmPassword
 
     if ($result) {
-        [System.Windows.MessageBox]::Show("Certificate successfully exported to $exportPath", "Success", [System.Windows.MessageBoxButtons]::OK, [System.Windows.MessageBoxIcon]::Information)
+        [System.Windows.MessageBox]::Show("Certificate successfully exported to $exportPath", "Success", 
+            [System.Windows.MessageBoxButton]::OK, 
+            [System.Windows.MessageBoxImage]::Information)
     }
 })
 
@@ -1168,5 +1170,8 @@ $sync.WorkingDirTextBox.Text = $CertificateStoragePath
 
 # Set up initial log message
 Write-ActivityLog "CSR Request Tool started" -Type Information
+
+# Add handler for Browse button
+$sync.BrowseFolderButton.Add_Click({ Select-WorkingDirectory })
 
 $window.ShowDialog() | Out-Null
