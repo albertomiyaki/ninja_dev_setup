@@ -81,7 +81,7 @@ function Write-ActivityLog {
 <Window 
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Title="CSR Request Tool" 
+    Title="Certificate Request Tool" 
     Height="920" 
     Width="700"
     WindowStartupLocation="CenterScreen">
@@ -144,22 +144,36 @@ function Write-ActivityLog {
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         
+        <!-- Header -->
         <Border Grid.Row="0" Background="#2d2d30" Padding="15">
             <Grid>
                 <StackPanel>
-                    <TextBlock Text="CSR Request Tool" FontSize="22" Foreground="White" FontWeight="Bold"/>
-                    <TextBlock Text="Generate and submit Certificate Signing Requests using certreq" 
-                               Foreground="#999999" Margin="0,5,0,0"/>
+                    <TextBlock Text="Certificate Request Tool" FontSize="22" Foreground="White" FontWeight="Bold"/>
+                    <TextBlock Text="Generate and manage certificate requests" Foreground="#999999" Margin="0,5,0,0"/>
                 </StackPanel>
             </Grid>
         </Border>
         
-        <TabControl Grid.Row="1" x:Name="MainTabControl" Margin="15">
+        <!-- Folder Selection Bar -->
+        <Grid Grid.Row="1" Background="#f0f0f0" Padding="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Label Grid.Column="0" Content="Working Directory:" VerticalAlignment="Center"/>
+            <TextBox Grid.Column="1" x:Name="WorkingDirTextBox" Margin="5,0,5,0" IsReadOnly="True"/>
+            <Button Grid.Column="2" x:Name="BrowseFolderButton" Content="Browse" Width="80"
+                    Style="{StaticResource DefaultButton}"/>
+        </Grid>
+        
+        <!-- Main Content -->
+        <TabControl Grid.Row="2" x:Name="MainTabControl" Margin="10">
             <TabItem Header="Create CSR">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
@@ -215,6 +229,7 @@ function Write-ActivityLog {
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
                                 
                                 <Label Grid.Row="0" Grid.Column="0" Content="Email Address:"/>
@@ -225,11 +240,11 @@ function Write-ActivityLog {
                                 <TextBox Grid.Row="1" Grid.Column="1" x:Name="OrganizationTextBox" 
                                          ToolTip="Your organization name"/>
                                 
-                                <Label Grid.Row="2" Grid.Column="0" Content="Org. Unit:"/>
+                                <Label Grid.Row="2" Grid.Column="0" Content="Organizational Unit:"/>
                                 <TextBox Grid.Row="2" Grid.Column="1" x:Name="OrgUnitTextBox" 
                                          ToolTip="Your organizational unit or department"/>
                                 
-                                <Label Grid.Row="3" Grid.Column="0" Content="City/Locality:"/>
+                                <Label Grid.Row="3" Grid.Column="0" Content="City:"/>
                                 <TextBox Grid.Row="3" Grid.Column="1" x:Name="CityTextBox" 
                                          ToolTip="Your city or locality"/>
                                 
@@ -242,29 +257,6 @@ function Write-ActivityLog {
                                          ToolTip="Two-letter country code (e.g. US, UK, CA)"/>
                             </Grid>
                         </GroupBox>
-                        
-                        <GroupBox Header="Preview" Padding="10" Margin="0,0,0,15">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                                
-                                <TextBlock Grid.Row="0" Text="The following information will be used to create your certificate:" Margin="0,0,0,5"/>
-                                <Border Grid.Row="1" BorderBrush="#CCCCCC" BorderThickness="1" CornerRadius="3" Background="#F8F8F8">
-                                    <TextBlock x:Name="PreviewTextBlock" FontFamily="Consolas" Padding="10" TextWrapping="Wrap"/>
-                                </Border>
-                            </Grid>
-                        </GroupBox>
-                        
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10,0,10">
-                            <Button x:Name="RefreshPreviewButton" Content="Refresh Preview" 
-                                    Style="{StaticResource DefaultButton}" Width="150"/>
-                            <Button x:Name="CreateCSRButton" Content="Create CSR" 
-                                    Style="{StaticResource DefaultButton}" Width="150" Margin="15,5,5,5"/>
-                            <Button x:Name="SubmitCSRButton" Content="Submit CSR" 
-                                    Style="{StaticResource DefaultButton}" Width="150" Margin="5,5,5,5"/>
-                        </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
@@ -274,111 +266,71 @@ function Write-ActivityLog {
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
-                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     
-                    <TextBlock Grid.Row="0" 
-                               Text="Retrieve and install your signed certificate" 
-                               FontSize="16" 
-                               FontWeight="Bold"
-                               Margin="0,0,0,15"/>
-                    
-                    <GroupBox Grid.Row="1" Header="Certificate Request Details" Padding="10" Margin="0,0,0,15">
+                    <!-- Request ID Input -->
+                    <GroupBox Grid.Row="0" Header="Certificate Request Details" Padding="10" 
+                             Margin="0,0,0,10">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="120"/>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
                             
-                            <Label Grid.Row="0" Grid.Column="0" Content="Request ID:"/>
-                            <TextBox Grid.Row="0" Grid.Column="1" x:Name="RequestIdTextBox" 
-                                     ToolTip="Enter the Request ID from your certificate request"/>
-                            <Button Grid.Row="0" Grid.Column="2" x:Name="CheckStatusButton" 
-                                    Content="Check Status" Style="{StaticResource DefaultButton}" 
-                                    Width="110" Margin="10,3,0,10"/>
-                            
-                            <Label Grid.Row="1" Grid.Column="0" Content="Certificate File:"/>
-                            <TextBox Grid.Row="1" Grid.Column="1" x:Name="CertFileTextBox" 
-                                     ToolTip="Path to a certificate file (.cer, .crt, .p7b)"/>
-                            <Button Grid.Row="1" Grid.Column="2" x:Name="BrowseCertButton" 
-                                    Content="Browse" Style="{StaticResource DefaultButton}" 
-                                    Width="110" Margin="10,3,0,10"/>
+                            <Label Grid.Column="0" Content="Request ID:"/>
+                            <TextBox Grid.Column="1" x:Name="RequestIdTextBox"/>
+                            <Button Grid.Column="2" x:Name="RetrieveCertButton" 
+                                    Content="Retrieve Certificate" Style="{StaticResource DefaultButton}" 
+                                    Width="150" Margin="10,0,0,0"/>
                         </Grid>
                     </GroupBox>
                     
-                    <GroupBox Grid.Row="2" Header="Certificate Status" Padding="10" Margin="0,0,0,15">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="120"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-                            
-                            <Label Grid.Row="0" Grid.Column="0" Content="Status:"/>
-                            <TextBlock Grid.Row="0" Grid.Column="1" x:Name="CertStatusTextBlock" 
-                                       Text="Not checked yet" Margin="5"/>
-                            
-                            <Label Grid.Row="1" Grid.Column="0" Content="Disposition:"/>
-                            <TextBlock Grid.Row="1" Grid.Column="1" x:Name="DispositionTextBlock" 
-                                       Text="-" Margin="5"/>
-                            
-                            <Label Grid.Row="2" Grid.Column="0" Content="Last Checked:"/>
-                            <TextBlock Grid.Row="2" Grid.Column="1" x:Name="LastCheckedTextBlock" 
-                                       Text="-" Margin="5"/>
-                        </Grid>
+                    <!-- Status Display -->
+                    <GroupBox Grid.Row="1" Header="Status" Padding="10" Margin="0,0,0,10">
+                        <TextBlock x:Name="StatusTextBlock" TextWrapping="Wrap"/>
                     </GroupBox>
-                    
-                    <GroupBox Grid.Row="3" Header="Certificate Actions" Padding="10" Margin="0,0,0,15">
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                            <Button x:Name="RetrieveButton" Content="Retrieve Certificate" 
-                                    Style="{StaticResource DefaultButton}" Width="160" Margin="5,5,15,5"/>
-                            <Button x:Name="InstallButton" Content="Install Certificate" 
-                                    Style="{StaticResource DefaultButton}" Width="160" Margin="5"/>
-                            <Button x:Name="ExportButton" Content="Export with Private Key" 
-                                    Style="{StaticResource DefaultButton}" Width="160" Margin="15,5,5,5"/>
-                        </StackPanel>
-                    </GroupBox>
-                    
-                    <GroupBox Grid.Row="4" Header="Certificate Details" Padding="10" Margin="0,0,0,15">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <TextBlock x:Name="CertDetailsTextBlock" FontFamily="Consolas" 
-                                       TextWrapping="Wrap" Padding="5"/>
-                        </ScrollViewer>
-                    </GroupBox>
+                </Grid>
+            </TabItem>
+            
+            <TabItem Header="Export PKCS#12">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.ColumnSpan="2" TextWrapping="Wrap" Margin="0,0,0,20"
+                               Text="Export certificate with private key from your personal store to PKCS#12 format."/>
+
+                    <Label Grid.Row="1" Content="Export Path:"/>
+                    <TextBox Grid.Row="1" Grid.Column="1" Name="ExportPathTextBox" Margin="0,0,0,10"/>
+
+                    <Label Grid.Row="2" Content="Password:"/>
+                    <PasswordBox Grid.Row="2" Grid.Column="1" Name="ExportPasswordTextBox" Margin="0,0,0,10"/>
+
+                    <Label Grid.Row="3" Content="Confirm Password:"/>
+                    <PasswordBox Grid.Row="3" Grid.Column="1" Name="ConfirmPasswordTextBox" Margin="0,0,0,10"/>
+
+                    <Button Grid.Row="4" Grid.Column="1" Content="Export PKCS#12" 
+                            Name="ExportButton" HorizontalAlignment="Left" Width="150" Margin="0,10,0,0"/>
                 </Grid>
             </TabItem>
         </TabControl>
         
-        <Grid Grid.Row="2" Margin="15,0,15,0">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="100"/>
-            </Grid.RowDefinitions>
-            <TextBlock Grid.Row="0" Text="Activity Log" FontWeight="Bold" FontSize="14" Margin="0,0,0,5"/>
-            <Border Grid.Row="1" BorderBrush="#CCCCCC" BorderThickness="1" CornerRadius="3">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <TextBox x:Name="LogTextBox" IsReadOnly="True" TextWrapping="Wrap" 
-                             FontFamily="Consolas" Background="#F8F8F8" BorderThickness="0"
-                             Padding="10"/>
-                </ScrollViewer>
-            </Border>
-        </Grid>
-        
-        <Border Grid.Row="3" Background="#E0E0E0" Padding="10,8" Margin="0,15,0,0">
-            <TextBlock x:Name="StatusBar" Text="Ready" FontSize="12"/>
-        </Border>
+        <!-- Log Area -->
+        <GroupBox Grid.Row="3" Header="Activity Log" Margin="10">
+            <TextBox x:Name="LogTextBox" Height="100" IsReadOnly="True" 
+                     VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+        </GroupBox>
     </Grid>
 </Window>
 "@
@@ -421,11 +373,16 @@ $sync.DispositionTextBlock = $window.FindName("DispositionTextBlock")
 $sync.LastCheckedTextBlock = $window.FindName("LastCheckedTextBlock")
 $sync.RetrieveButton = $window.FindName("RetrieveButton")
 $sync.InstallButton = $window.FindName("InstallButton")
-$sync.ExportButton = $window.FindName("ExportButton")
 $sync.CertDetailsTextBlock = $window.FindName("CertDetailsTextBlock")
 
+$sync.ExportPathTextBox = $window.FindName("ExportPathTextBox")
+$sync.ExportPasswordTextBox = $window.FindName("ExportPasswordTextBox")
+$sync.ConfirmPasswordTextBox = $window.FindName("ConfirmPasswordTextBox")
+$sync.ExportButton = $window.FindName("ExportButton")
+
+# Initialize form with default values
 $sync.CommonNameTextBox.Text = $hostname
-$sync.FriendlyNameTextBox.Text = "$shortHostname Certificate"
+$sync.FriendlyNameTextBox.Text = "$shortHostname"
 $sync.EmailTextBox.Text = $defaultEmail
 $sync.OrganizationTextBox.Text = "YourCompany"
 $sync.OrgUnitTextBox.Text = "YourOrg"
@@ -444,6 +401,29 @@ foreach ($template in $availableTemplates) {
 }
 if ($sync.TemplateComboBox.Items.Count -gt 0) {
     $sync.TemplateComboBox.SelectedIndex = 0
+}
+
+# Initialize working directory with CertificateStoragePath
+$sync.WorkingDirTextBox = $window.FindName("WorkingDirTextBox")
+$sync.BrowseFolderButton = $window.FindName("BrowseFolderButton")
+$sync.WorkingDirTextBox.Text = $CertificateStoragePath
+
+# Add function to handle working directory selection
+function Select-WorkingDirectory {
+    $folderBrowser = New-Object System.Windows.Forms.FolderBrowserDialog
+    $folderBrowser.Description = "Select Working Directory"
+    $folderBrowser.SelectedPath = $sync.WorkingDirTextBox.Text
+    
+    if ($folderBrowser.ShowDialog() -eq "OK") {
+        $sync.WorkingDirTextBox.Text = $folderBrowser.SelectedPath
+        Write-ActivityLog "Working directory changed to: $($folderBrowser.SelectedPath)" -Type Information
+        
+        # Create directory if it doesn't exist
+        if (-not (Test-Path $folderBrowser.SelectedPath)) {
+            New-Item -Path $folderBrowser.SelectedPath -ItemType Directory | Out-Null
+            Write-ActivityLog "Created working directory" -Type Information
+        }
+    }
 }
 
 function Update-Preview {
@@ -538,13 +518,14 @@ function Create-CSRConfigFile {
     $requestId = [Guid]::NewGuid().ToString()
     $sync.CurrentRequestId = $requestId
     
-    # Ensure certificate storage directory exists
-    if (-not (Test-Path $CertificateStoragePath)) {
-        New-Item -Path $CertificateStoragePath -ItemType Directory | Out-Null
+    # Use working directory instead of CertificateStoragePath
+    $workingDir = $sync.WorkingDirTextBox.Text
+    if (-not (Test-Path $workingDir)) {
+        New-Item -Path $workingDir -ItemType Directory | Out-Null
     }
     
-    $configFile = "$CertificateStoragePath\CSR_Config_$requestId.inf"
-    $csrFile = "$CertificateStoragePath\CSR_$requestId.req"
+    $configFile = Join-Path $workingDir "CSR_Config_$requestId.inf"
+    $csrFile = Join-Path $workingDir "CSR_$requestId.req"
     $sync.CurrentConfigFile = $configFile
     $sync.CurrentCSRFile = $csrFile
     
@@ -650,61 +631,73 @@ function Create-CSR {
 }
 
 function Submit-CSR {
+    if (-not $sync.CurrentCSRFile -or -not (Test-Path $sync.CurrentCSRFile)) {
+        Write-ActivityLog "No CSR file selected. Please generate or select a CSR first." -Type Error
+        return $false
+    }
+    
+    $result = [System.Windows.MessageBox]::Show(
+        "Are you sure you want to submit this CSR to the Certificate Authority?",
+        "Confirm Submission",
+        [System.Windows.MessageBoxButton]::YesNo,
+        [System.Windows.MessageBoxImage]::Question
+    )
+    
+    if ($result -eq [System.Windows.MessageBoxResult]::No) {
+        return $false
+    }
+    
     try {
-        if (-not (Test-Path $sync.CurrentCSRFile)) {
-            Write-ActivityLog "No CSR file found. Please create a CSR first." -Type Error
-            $sync.StatusBar.Text = "CSR file not found"
-            [System.Windows.MessageBox]::Show("No CSR file found. Please create a CSR first.", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
-            return $false
-        }
         Write-ActivityLog "Submitting CSR to the Certificate Authority..." -Type Information
-        $sync.StatusBar.Text = "Submitting CSR..."
         
-        $responseFile = $sync.CurrentCSRFile -replace "\.req$", ".rsp"
-        $certFile = $sync.CurrentCSRFile -replace "\.req$", ".cer"
-        $sync.CurrentResponseFile = $responseFile
-        $sync.CurrentCertFile = $certFile
+        $workingDir = $sync.WorkingDirTextBox.Text
+        $baseFileName = [System.IO.Path]::GetFileNameWithoutExtension($sync.CurrentCSRFile)
+        $responseFile = Join-Path $workingDir "$baseFileName.rsp"
+        $certFile = Join-Path $workingDir "$baseFileName.cer"
         
         $submitResult = & certreq -submit -config "$CA_Server" "$($sync.CurrentCSRFile)" "$responseFile" "$certFile" 2>&1
         if ($LASTEXITCODE -eq 0) {
             $requestIdMatch = [regex]::Match($submitResult, "RequestId:\s*(\d+)")
             if ($requestIdMatch.Success) {
                 $caRequestId = $requestIdMatch.Groups[1].Value
-                $sync.CARequestId = $caRequestId
-                Write-ActivityLog "CSR submitted successfully. CA Request ID: $caRequestId" -Type Success
+                Write-ActivityLog "CSR submitted successfully. Request ID: $caRequestId" -Type Success
                 
-                $requestInfoFile = $sync.CurrentCSRFile -replace "\.req$", ".info"
+                # Update status and GUI
+                $sync.StatusBar.Text = "CSR submitted (Request ID: $caRequestId)"
+                $sync.RequestIdTextBox.Text = $caRequestId
+                $sync.StatusTextBlock.Text = "CSR submitted with Request ID: $caRequestId"
+                
+                # Save request information
+                $requestInfoFile = Join-Path $workingDir "$baseFileName.info"
                 @{
-                    RequestId    = $caRequestId
-                    ConfigFile   = $sync.CurrentConfigFile
-                    CSRFile      = $sync.CurrentCSRFile
+                    RequestId = $caRequestId
+                    ConfigFile = $configFile
+                    CSRFile = $sync.CurrentCSRFile
                     ResponseFile = $responseFile
-                    CertFile     = $certFile
-                    SubmittedAt  = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                    CertFile = $certFile
+                    SubmittedAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
                 } | ConvertTo-Json | Out-File -FilePath $requestInfoFile -Encoding utf8
                 
-                $sync.StatusBar.Text = "CSR submitted (Request ID: $caRequestId)"
-                [System.Windows.MessageBox]::Show("CSR has been submitted successfully to the CA.`n`nRequest ID: $caRequestId`n`nThis Request ID has been saved and can be used to retrieve the certificate later.", "CSR Submitted", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+                # Switch to retrieve tab and populate request ID
                 $sync.MainTabControl.SelectedIndex = 1
-                return $true
-            }
-            else {
-                Write-ActivityLog "CSR submitted but could not determine Request ID" -Type Warning
-                $sync.StatusBar.Text = "CSR submitted (unknown Request ID)"
-                [System.Windows.MessageBox]::Show("CSR has been submitted, but the Request ID could not be determined.`n`nOutput: $submitResult", "CSR Submitted", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
+                $sync.RequestIdTextBox.Text = $caRequestId
+                
+                [System.Windows.MessageBox]::Show(
+                    "CSR has been submitted successfully.`n`nRequest ID: $caRequestId`n`nPlease note this ID for retrieving your certificate later.",
+                    "CSR Submitted",
+                    [System.Windows.MessageBoxButton]::OK,
+                    [System.Windows.MessageBoxImage]::Information
+                )
                 return $true
             }
         }
-        else {
-            Write-ActivityLog "Error submitting CSR: $submitResult" -Type Error
-            $sync.StatusBar.Text = "Error submitting CSR"
-            [System.Windows.MessageBox]::Show("Error submitting CSR: $submitResult", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
-            return $false
-        }
+        
+        Write-ActivityLog "Error submitting CSR: $submitResult" -Type Error
+        [System.Windows.MessageBox]::Show("Error submitting CSR: $submitResult", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+        return $false
     }
     catch {
         Write-ActivityLog "Error submitting CSR: $_" -Type Error
-        $sync.StatusBar.Text = "Error submitting CSR"
         [System.Windows.MessageBox]::Show("Error submitting CSR: $_", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
         return $false
     }
@@ -780,7 +773,7 @@ function Browse-CertificateFile {
     $openFileDialog = New-Object System.Windows.Forms.OpenFileDialog
     $openFileDialog.Title = "Select Certificate File"
     $openFileDialog.Filter = "Certificate Files (*.cer;*.crt;*.p7b)|*.cer;*.crt;*.p7b|All Files (*.*)|*.*"
-    $openFileDialog.InitialDirectory = $CertificateStoragePath
+    $openFileDialog.InitialDirectory = $sync.WorkingDirTextBox.Text
     
     if ($openFileDialog.ShowDialog() -eq "OK") {
         $sync.CertFileTextBox.Text = $openFileDialog.FileName
@@ -794,74 +787,88 @@ function Retrieve-Certificate {
         $requestId = $sync.RequestIdTextBox.Text.Trim()
         if ([string]::IsNullOrWhiteSpace($requestId)) {
             Write-ActivityLog "Please enter a valid Request ID" -Type Warning
-            return
+            return $null
         }
         
         Write-ActivityLog "Retrieving certificate for Request ID: $requestId" -Type Information
-        $sync.StatusBar.Text = "Retrieving certificate..."
         
-        # Create certificate file path
+        # Use working directory for certificate file
+        $workingDir = $sync.WorkingDirTextBox.Text
         $certFileName = "Certificate_$requestId.cer"
-        $certFilePath = Join-Path -Path $CertificateStoragePath -ChildPath $certFileName
+        $certFilePath = Join-Path -Path $workingDir -ChildPath $certFileName
+        
+        # First check if we have info file for this request
+        $infoFiles = Get-ChildItem -Path $workingDir -Filter "*.info"
+        $matchingInfo = $null
+        foreach ($file in $infoFiles) {
+            $info = Get-Content $file.FullName | ConvertFrom-Json
+            if ($info.RequestId -eq $requestId) {
+                $certFilePath = $info.CertFile
+                Write-ActivityLog "Found existing request info, using saved certificate path" -Type Information
+                break
+            }
+        }
         
         # Retrieve the certificate
         $retrieveResult = & certreq -retrieve -config "$CA_Server" $requestId "$certFilePath" 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-ActivityLog "Certificate retrieved successfully: $certFilePath" -Type Success
-            $sync.CertFileTextBox.Text = $certFilePath
             $sync.StatusBar.Text = "Certificate retrieved successfully"
+            $sync.CertFileTextBox.Text = $certFilePath
             
-            # Display certificate details
-            Get-CertificateDetails -CertPath $certFilePath
-            
-            # Enable install button
-            $sync.InstallButton.IsEnabled = $true
-            
-            [System.Windows.MessageBox]::Show("Certificate has been successfully retrieved and saved to:`n$certFilePath", "Certificate Retrieved", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+            return $certFilePath
         }
         else {
             Write-ActivityLog "Error retrieving certificate: $retrieveResult" -Type Error
             $sync.StatusBar.Text = "Error retrieving certificate"
             [System.Windows.MessageBox]::Show("Error retrieving certificate: $retrieveResult", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            return $null
         }
     }
     catch {
         Write-ActivityLog "Error retrieving certificate: $_" -Type Error
         $sync.StatusBar.Text = "Error retrieving certificate"
-        [System.Windows.MessageBox]::Show("Error retrieving certificate: $_", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+        return $null
     }
 }
 
 function Install-Certificate {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$CertPath
+    )
+    
     try {
-        $certPath = $sync.CertFileTextBox.Text.Trim()
-        if (-not (Test-Path $certPath)) {
-            Write-ActivityLog "Certificate file not found: $certPath" -Type Error
-            [System.Windows.MessageBox]::Show("Certificate file not found: $certPath", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
-            return
+        if (-not (Test-Path $CertPath)) {
+            Write-ActivityLog "Certificate file not found: $CertPath" -Type Error
+            [System.Windows.MessageBox]::Show("Certificate file not found: $CertPath", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            return $false
         }
         
-        Write-ActivityLog "Installing certificate from: $certPath" -Type Information
+        Write-ActivityLog "Installing certificate from: $CertPath" -Type Information
         $sync.StatusBar.Text = "Installing certificate..."
         
         # Install the certificate
-        $installResult = & certreq -accept "$certPath" 2>&1
+        $installResult = & certreq -accept "$CertPath" 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-ActivityLog "Certificate installed successfully" -Type Success
             $sync.StatusBar.Text = "Certificate installed successfully"
-            $sync.ExportButton.IsEnabled = $true
+            # $sync.ExportButton.IsEnabled = $true
             [System.Windows.MessageBox]::Show("Certificate has been successfully installed in the certificate store.", "Certificate Installed", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+            return $true
         }
         else {
             Write-ActivityLog "Error installing certificate: $installResult" -Type Error
             $sync.StatusBar.Text = "Error installing certificate"
             [System.Windows.MessageBox]::Show("Error installing certificate: $installResult", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            return $false
         }
     }
     catch {
         Write-ActivityLog "Error installing certificate: $_" -Type Error
         $sync.StatusBar.Text = "Error installing certificate"
         [System.Windows.MessageBox]::Show("Error installing certificate: $_", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+        return $false
     }
 }
 
@@ -895,130 +902,57 @@ function Get-CertificateDetails {
     }
 }
 
-function Export-CertificateWithPrivateKey {
+function Export-Pkcs12 {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$CertificatePath,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$ExportPath,
+        
+        [Parameter(Mandatory=$true)]
+        [System.Security.SecureString]$Password,
+        
+        [Parameter(Mandatory=$true)]
+        [System.Security.SecureString]$ConfirmPassword
+    )
+
     try {
-        # Get current certificate information from the file
-        $certPath = $sync.CertFileTextBox.Text.Trim()
-        if (-not (Test-Path $certPath)) {
-            Write-ActivityLog "Certificate file not found: $certPath" -Type Error
-            [System.Windows.MessageBox]::Show("Certificate file not found: $certPath", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
-            return
+        # Convert passwords to strings for comparison (will be cleared immediately)
+        $BSTR1 = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Password)
+        $plainPassword1 = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR1)
+        $BSTR2 = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ConfirmPassword)
+        $plainPassword2 = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR2)
+
+        # Clear BSTRs immediately
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR1)
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR2)
+
+        if ($plainPassword1 -ne $plainPassword2) {
+            throw "Passwords do not match"
         }
-        
-        # Get certificate details to find the subject
-        $certSubject = & certutil -dump "$certPath" | Select-String -Pattern "Subject:" | ForEach-Object { $_ -replace ".*Subject: ", "" }
-        if (-not $certSubject) {
-            Write-ActivityLog "Could not determine certificate subject" -Type Error
-            [System.Windows.MessageBox]::Show("Could not determine certificate subject", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
-            return
+
+        # Clear plaintext passwords
+        $plainPassword1 = $null
+        $plainPassword2 = $null
+        [System.GC]::Collect()
+
+        # Get certificate from file to match
+        $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($CertificatePath)
+        $certThumbprint = $cert.Thumbprint
+
+        # Find matching certificate with private key
+        $matchingCert = Get-ChildItem -Path Cert:\CurrentUser\My | Where-Object {
+            $_.Thumbprint -eq $certThumbprint -and $_.HasPrivateKey
+        } | Select-Object -First 1
+
+        if (-not $matchingCert) {
+            throw "No certificate with matching thumbprint and private key found in your personal store."
         }
-        
-        # Create password dialog
-        $passwordForm = New-Object System.Windows.Forms.Form
-        $passwordForm.Text = "Enter PFX Password"
-        $passwordForm.Size = New-Object System.Drawing.Size(350, 200)
-        $passwordForm.StartPosition = "CenterScreen"
-        $passwordForm.FormBorderStyle = "FixedDialog"
-        $passwordForm.MaximizeBox = $false
-        $passwordForm.MinimizeBox = $false
-        
-        $passwordLabel = New-Object System.Windows.Forms.Label
-        $passwordLabel.Text = "Enter password to protect the PFX file:"
-        $passwordLabel.Size = New-Object System.Drawing.Size(300, 20)
-        $passwordLabel.Location = New-Object System.Drawing.Point(10, 20)
-        
-        $passwordTextBox = New-Object System.Windows.Forms.MaskedTextBox
-        $passwordTextBox.PasswordChar = '*'
-        $passwordTextBox.Size = New-Object System.Drawing.Size(300, 20)
-        $passwordTextBox.Location = New-Object System.Drawing.Point(10, 50)
-        
-        $confirmLabel = New-Object System.Windows.Forms.Label
-        $confirmLabel.Text = "Confirm password:"
-        $confirmLabel.Size = New-Object System.Drawing.Size(300, 20)
-        $confirmLabel.Location = New-Object System.Drawing.Point(10, 80)
-        
-        $confirmTextBox = New-Object System.Windows.Forms.MaskedTextBox
-        $confirmTextBox.PasswordChar = '*'
-        $confirmTextBox.Size = New-Object System.Drawing.Size(300, 20)
-        $confirmTextBox.Location = New-Object System.Drawing.Point(10, 110)
-        
-        $okButton = New-Object System.Windows.Forms.Button
-        $okButton.Text = "OK"
-        $okButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
-        $okButton.Size = New-Object System.Drawing.Size(75, 23)
-        $okButton.Location = New-Object System.Drawing.Point(75, 140)
-        
-        $cancelButton = New-Object System.Windows.Forms.Button
-        $cancelButton.Text = "Cancel"
-        $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-        $cancelButton.Size = New-Object System.Drawing.Size(75, 23)
-        $cancelButton.Location = New-Object System.Drawing.Point(165, 140)
-        
-        $passwordForm.Controls.Add($passwordLabel)
-        $passwordForm.Controls.Add($passwordTextBox)
-        $passwordForm.Controls.Add($confirmLabel)
-        $passwordForm.Controls.Add($confirmTextBox)
-        $passwordForm.Controls.Add($okButton)
-        $passwordForm.Controls.Add($cancelButton)
-        $passwordForm.AcceptButton = $okButton
-        $passwordForm.CancelButton = $cancelButton
-        
-        # Show password dialog
-        $result = $passwordForm.ShowDialog()
-        if ($result -ne [System.Windows.Forms.DialogResult]::OK) {
-            return
-        }
-        
-        # Validate passwords match
-        if ($passwordTextBox.Text -ne $confirmTextBox.Text) {
-            [System.Windows.MessageBox]::Show("Passwords do not match", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
-            return
-        }
-        
-        # Create save file dialog
-        $saveFileDialog = New-Object System.Windows.Forms.SaveFileDialog
-        $saveFileDialog.Title = "Save PFX File"
-        $saveFileDialog.Filter = "PFX Files (*.pfx)|*.pfx|All Files (*.*)|*.*"
-        $saveFileDialog.InitialDirectory = $CertificateStoragePath
-        $saveFileDialog.FileName = [System.IO.Path]::GetFileNameWithoutExtension($certPath) + ".pfx"
-        
-        if ($saveFileDialog.ShowDialog() -ne "OK") {
-            return
-        }
-        
-        $pfxPath = $saveFileDialog.FileName
-        Write-ActivityLog "Exporting certificate with private key to: $pfxPath" -Type Information
-        $sync.StatusBar.Text = "Exporting certificate with private key..."
-        
-        # Export the certificate with private key
-        $exportCmd = @"
-        # Find certificate by subject
-        `$cert = Get-ChildItem -Path Cert:\LocalMachine\My -Recurse | Where-Object { `$_.Subject -like "*$certSubject*" } | Select-Object -First 1
-        if (`$cert) {
-            # Export to PFX
-            Export-PfxCertificate -Cert `$cert -FilePath '$pfxPath' -Password (ConvertTo-SecureString -String '$($passwordTextBox.Text)' -Force -AsPlainText) -ChainOption BuildChain
-            if (Test-Path '$pfxPath') {
-                Write-Output "SUCCESS: Certificate exported to $pfxPath"
-            } else {
-                Write-Output "ERROR: Failed to create PFX file"
-            }
-        } else {
-            Write-Output "ERROR: Certificate not found in store with subject: $certSubject"
-        }
-"@
-        
-        $exportResult = PowerShell -Command $exportCmd 2>&1
-        
-        if ($exportResult -like "*SUCCESS:*") {
-            Write-ActivityLog "Certificate exported successfully: $pfxPath" -Type Success
-            $sync.StatusBar.Text = "Certificate exported successfully"
-            [System.Windows.MessageBox]::Show("Certificate with private key has been successfully exported to:`n$pfxPath", "Export Successful", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
-        }
-        else {
-            Write-ActivityLog "Error exporting certificate: $exportResult" -Type Error
-            $sync.StatusBar.Text = "Error exporting certificate"
-            [System.Windows.MessageBox]::Show("Error exporting certificate: $exportResult", "Export Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
-        }
+
+        # Export the certificate
+        Export-PfxCertificate -Cert $matchingCert -FilePath $ExportPath -Password $Password -CryptoAlgorithmOption AES256_SHA256
+        return $true
     }
     catch {
         Write-ActivityLog "Error exporting certificate: $_" -Type Error
@@ -1027,26 +961,195 @@ function Export-CertificateWithPrivateKey {
     }
 }
 
-$sync.RefreshPreviewButton.Add_Click({ Update-Preview })
-$sync.CreateCSRButton.Add_Click({
+function Find-ExistingCSR {
+    $workingDir = $sync.WorkingDirTextBox.Text
+    $csrFiles = Get-ChildItem -Path $workingDir -Filter "*.req" -ErrorAction SilentlyContinue
+    
+    if ($csrFiles.Count -gt 0) {
+        $result = [System.Windows.MessageBox]::Show(
+            "Found existing CSR file(s) in the working directory. Would you like to use an existing CSR?",
+            "Existing CSR Found",
+            [System.Windows.MessageBoxButton]::YesNo,
+            [System.Windows.MessageBoxImage]::Question
+        )
+        
+        if ($result -eq [System.Windows.MessageBoxResult]::Yes) {
+            $openFileDialog = New-Object System.Windows.Forms.OpenFileDialog
+            $openFileDialog.Title = "Select CSR File"
+            $openFileDialog.Filter = "CSR Files (*.req)|*.req|All Files (*.*)|*.*"
+            $openFileDialog.InitialDirectory = $workingDir
+            
+            if ($openFileDialog.ShowDialog() -eq "OK") {
+                $sync.CurrentCSRFile = $openFileDialog.FileName
+                return $true
+            }
+        }
+    }
+    return $false
+}
+
+function Generate-CSR {
+    if (Find-ExistingCSR) {
+        Write-ActivityLog "Using existing CSR file: $($sync.CurrentCSRFile)" -Type Information
+        $sync.SendToCAButton.IsEnabled = $true
+        return $true
+    }
+    
+    $userInfo = Get-FormInput
+    
+    if (Create-CSR -UserInfo $userInfo) {
+        $sync.SendToCAButton.IsEnabled = $true
+        return $true
+    }
+    
+    return $false
+}
+
+function Retrieve-CertificateManual {
+    try {
+        $requestId = $sync.RequestIdTextBox.Text.Trim()
+        if ([string]::IsNullOrWhiteSpace($requestId)) {
+            Write-ActivityLog "Please enter a valid Request ID" -Type Warning
+            return
+        }
+
+        # First check if we have info file for this request
+        $infoFiles = Get-ChildItem -Path $sync.WorkingDirTextBox.Text -Filter "*.info"
+        $matchingInfo = $null
+        foreach ($file in $infoFiles) {
+            $info = Get-Content $file.FullName | ConvertFrom-Json
+            if ($info.RequestId -eq $requestId) {
+                $matchingInfo = $info
+                break
+            }
+        }
+
+        # If we found matching info, use those paths
+        if ($matchingInfo) {
+            $certFile = $matchingInfo.CertFile
+            Write-ActivityLog "Found existing request info, using saved certificate path" -Type Information
+        }
+        else {
+            # Let user choose where to save the certificate
+            $saveFileDialog = New-Object System.Windows.Forms.SaveFileDialog
+            $saveFileDialog.Title = "Save Certificate File"
+            $saveFileDialog.Filter = "Certificate Files (*.cer)|*.cer|All Files (*.*)|*.*"
+            $saveFileDialog.InitialDirectory = $sync.WorkingDirTextBox.Text
+            $saveFileDialog.FileName = "Certificate_$requestId.cer"
+            
+            if ($saveFileDialog.ShowDialog() -ne "OK") {
+                return
+            }
+            $certFile = $saveFileDialog.FileName
+        }
+
+        # Retrieve the certificate
+        Write-ActivityLog "Retrieving certificate for Request ID: $requestId" -Type Information
+        $retrieveResult = & certreq -retrieve -config "$CA_Server" $requestId "$certFile" 2>&1
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-ActivityLog "Certificate retrieved successfully: $certFile" -Type Success
+            $sync.StatusBar.Text = "Certificate retrieved successfully"
+            $sync.StatusTextBlock.Text = "Certificate retrieved successfully"
+            
+            # Ask if user wants to install the certificate
+            $installResult = [System.Windows.MessageBox]::Show(
+                "Certificate has been retrieved successfully. Would you like to install it now?",
+                "Install Certificate",
+                [System.Windows.MessageBoxButton]::YesNo,
+                [System.Windows.MessageBoxImage]::Question
+            )
+            
+            if ($installResult -eq [System.Windows.MessageBoxResult]::Yes) {
+                Install-Certificate -CertPath $certFile
+            }
+        }
+        else {
+            Write-ActivityLog "Error retrieving certificate: $retrieveResult" -Type Error
+            $sync.StatusBar.Text = "Error retrieving certificate"
+            [System.Windows.MessageBox]::Show("Error retrieving certificate: $retrieveResult", "Error")
+        }
+    }
+    catch {
+        Write-ActivityLog "Error retrieving certificate: $_" -Type Error
+        $sync.StatusBar.Text = "Error retrieving certificate"
+    }
+}
+
+# Button click handlers
+$sync.GenerateCSRButton.Add_Click({
     $userInfo = Get-FormInput
     if (Create-CSR -UserInfo $userInfo) {
         Update-Preview
+        $sync.SendToCAButton.IsEnabled = $true
     }
 })
-$sync.SubmitCSRButton.Add_Click({ Submit-CSR })
 
-# Certificate retrieval tab button handlers
-$sync.CheckStatusButton.Add_Click({ Check-CertificateStatus })
-$sync.BrowseCertButton.Add_Click({ Browse-CertificateFile })
-$sync.RetrieveButton.Add_Click({ Retrieve-Certificate })
-$sync.InstallButton.Add_Click({ Install-Certificate })
-$sync.ExportButton.Add_Click({ Export-CertificateWithPrivateKey })
+$sync.SendToCAButton.Add_Click({ Submit-CSR })
 
-# Initialize button states for the certificate tab
-$sync.RetrieveButton.IsEnabled = $false
-$sync.InstallButton.IsEnabled = $false
-$sync.ExportButton.IsEnabled = $false
+$sync.RetrieveCertButton.Add_Click({
+    $certPath = Retrieve-Certificate
+    if ($certPath) {
+        $result = [System.Windows.MessageBox]::Show(
+            "Certificate retrieved successfully. Would you like to install it now?",
+            "Install Certificate",
+            [System.Windows.MessageBoxButton]::YesNo,
+            [System.Windows.MessageBoxImage]::Question
+        )
+        if ($result -eq [System.Windows.MessageBoxResult]::Yes) {
+            Install-Certificate -CertPath $certPath
+        }
+    }
+})
+
+$sync.InstallButton.Add_Click({
+    if ($sync.CertFileTextBox.Text) {
+        Install-Certificate -CertPath $sync.CertFileTextBox.Text
+    }
+})
+
+# Add handler for preview refresh
+$sync.RefreshPreviewButton.Add_Click({ Update-Preview })
+
+# Add event handler for the Export button
+$sync.ExportButton.Add_Click({
+    $exportPath = $sync.ExportPathTextBox.Text
+    
+    if ([string]::IsNullOrWhiteSpace($exportPath)) {
+        [System.Windows.MessageBox]::Show("Please specify an export path.", "Error", [System.Windows.MessageBoxButtons]::OK, [System.Windows.MessageBoxIcon]::Error)
+        return
+    }
+
+    $password = $sync.ExportPasswordTextBox.SecurePassword
+    $confirmPassword = $sync.ConfirmPasswordTextBox.SecurePassword
+    $cerPath = "$workingDir\$($sync.txtCN.Text).cer"
+
+    if (-not (Test-Path $cerPath)) {
+        [System.Windows.MessageBox]::Show("Certificate file not found. Please request a certificate first.", "Error", [System.Windows.MessageBoxButtons]::OK, [System.Windows.MessageBoxIcon]::Error)
+        return
+    }
+
+    $result = Export-Pkcs12 -CertificatePath $cerPath -ExportPath $exportPath -Password $password -ConfirmPassword $confirmPassword
+
+    if ($result) {
+        [System.Windows.MessageBox]::Show("Certificate successfully exported to $exportPath", "Success", [System.Windows.MessageBoxButtons]::OK, [System.Windows.MessageBoxIcon]::Information)
+    }
+})
+
+# Update export path when CN changes
+$sync.txtCN.Add_TextChanged({
+    $sync.ExportPathTextBox.Text = "$workingDir\$($sync.txtCN.Text).p12"
+})
+
+# Initialize button states
+$sync.SendToCAButton.IsEnabled = $false
+$sync.RetrieveCertButton.IsEnabled = $true
+
+# Update the working directory initialization
+if (-not (Test-Path $CertificateStoragePath)) {
+    New-Item -Path $CertificateStoragePath -ItemType Directory -Force | Out-Null
+}
+$sync.WorkingDirTextBox.Text = $CertificateStoragePath
 
 # Set up initial log message
 Write-ActivityLog "CSR Request Tool started" -Type Information
